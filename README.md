@@ -8,6 +8,8 @@ Scans public **free** data sources (Yahoo Finance via [`yfinance`](https://githu
 * Filters by days-to-expiration, bid price, open interest, OTM%, and minimum annualised return.
 * Ranks candidates with a composite score (annualised return + liquidity bonus).
 * Displays a formatted summary table; optionally exports full results to CSV.
+* **Emails an HTML summary** to any address via Gmail (or any SMTP relay).
+* **Runs automatically every weekday** via a GitHub Actions scheduled workflow.
 * Configurable ticker lists and screening parameters in `scanner/config.py`.
 
 ## Quick Start
@@ -24,6 +26,10 @@ python main.py --exchange nasdaq --top 5
 
 # 4 – TSX, cash-secured puts only, save to CSV
 python main.py --exchange tsx --strategy put --output tsx_puts.csv
+
+# 5 – Scan and email results to yourself
+SMTP_USER=you@gmail.com SMTP_PASSWORD="your-app-password" \
+  python main.py --email you@gmail.com
 ```
 
 ### CLI options
@@ -32,20 +38,82 @@ python main.py --exchange tsx --strategy put --output tsx_puts.csv
 |------|---------|-------------|
 | `--exchange` | `all` | `tsx`, `nasdaq`, or `all` |
 | `--strategy` | `all` | `call`, `put`, or `all` |
-| `--top` | `10` | Number of suggestions per strategy to print |
+| `--top` | `10` | Number of suggestions per strategy to print/email |
 | `--output FILE` | – | Save full results to a CSV file |
+| `--email ADDRESS` | – | Send HTML summary to this address (comma-separate for multiple) |
+| `--smtp-host` | `smtp.gmail.com` | SMTP server hostname |
+| `--smtp-port` | `587` | SMTP server port (STARTTLS) |
+| `--smtp-user` | `$SMTP_USER` | Sender email address |
+| `--smtp-password` | `$SMTP_PASSWORD` | SMTP / App Password |
+
+## Automated Daily Email via GitHub Actions
+
+The workflow at `.github/workflows/daily_scan.yml` runs the scanner automatically
+every weekday at **9:30 AM Eastern Time** (13:30 UTC) and emails you the results.
+
+### One-time setup (5 minutes)
+
+**Step 1 – Create a Gmail App Password**
+
+> You need this because Gmail blocks plain passwords for scripts.
+> Your regular Gmail password will *not* work.
+
+1. Go to **myaccount.google.com/security** and enable **2-Step Verification** if not already on.
+2. Go to **myaccount.google.com/apppasswords**.
+3. Choose app = *Mail*, device = *Other* → type `dailyoptionstrading` → click **Generate**.
+4. Copy the 16-character password shown — you won't see it again.
+
+**Step 2 – Add three GitHub repository secrets**
+
+Go to your repo on GitHub → **Settings → Secrets and variables → Actions → New repository secret** and add:
+
+| Secret name | Value |
+|---|---|
+| `SMTP_USER` | your Gmail address, e.g. `yourname@gmail.com` |
+| `SMTP_PASSWORD` | the 16-character App Password from Step 1 |
+| `EMAIL_TO` | the address to send results to (can be the same as `SMTP_USER`) |
+
+**Step 3 – Enable Actions (if disabled)**
+
+Go to your repo → **Actions** tab → click **"I understand my workflows, go ahead and enable them"** if prompted.
+
+**That's it.** The scanner will run automatically on the next weekday morning.
+
+### Running manually
+
+You can also trigger the workflow on demand:
+
+1. Go to **Actions → Daily Options Scan → Run workflow**.
+2. Optionally override the exchange, strategy, or top-N values.
+3. Click **Run workflow**.
+
+### Changing the schedule
+
+Edit the `cron` line in `.github/workflows/daily_scan.yml`:
+
+```yaml
+# Current: 13:30 UTC = 9:30 AM ET
+- cron: "30 13 * * 1-5"
+
+# Examples:
+# "30 14 * * 1-5"  = 10:30 AM ET
+# "0  21 * * 1-5"  = 5:00 PM ET (after-hours recap)
+# "0  14 * * 1-5"  = 10:00 AM ET
+```
 
 ## Project Layout
 
 ```
 dailyoptionstrading/
-├── main.py                  # CLI entry point
+├── .github/workflows/daily_scan.yml  # Scheduled email workflow
+├── main.py                           # CLI entry point
 ├── requirements.txt
 ├── scanner/
-│   ├── config.py            # Ticker lists & screening parameters
-│   ├── data_fetcher.py      # Yahoo Finance data retrieval
-│   ├── analyzer.py          # DTE, OTM%, annualised return, scoring
-│   └── suggester.py         # Screening filters & suggestion ranking
+│   ├── config.py      # Ticker lists & screening parameters
+│   ├── data_fetcher.py # Yahoo Finance data retrieval
+│   ├── analyzer.py    # DTE, OTM%, annualised return, scoring
+│   ├── emailer.py     # HTML email builder and SMTP sender
+│   └── suggester.py   # Screening filters & suggestion ranking
 └── tests/
     ├── test_analyzer.py
     └── test_suggester.py
@@ -85,4 +153,3 @@ above equally-priced illiquid ones.
 > **Disclaimer:** The suggestions produced by this tool are **not** financial
 > advice.  Always do your own research and consult a licensed financial adviser
 > before trading options.
-

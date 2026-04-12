@@ -14,10 +14,18 @@ Usage examples
 
   # TSX only, show only put suggestions, save to CSV
   python main.py --exchange tsx --strategy put --output suggestions.csv
+
+  # Scan and email results (credentials via env vars SMTP_USER / SMTP_PASSWORD)
+  python main.py --email you@example.com
+
+  # Scan and email with explicit SMTP settings
+  python main.py --email you@example.com --smtp-host smtp.gmail.com \\
+                 --smtp-user sender@gmail.com --smtp-password "app-password"
 """
 
 import argparse
 import logging
+import os
 import sys
 import time
 from datetime import date
@@ -31,6 +39,7 @@ from scanner.data_fetcher import (
     get_options_chain,
     get_stock_price,
 )
+from scanner.emailer import build_html_email, send_email
 from scanner.suggester import generate_suggestions, screen_options
 
 # ── Logging ────────────────────────────────────────────────────────────────────
@@ -190,6 +199,38 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         help="Optional path to save full results as CSV.",
     )
+    # ── Email options ──────────────────────────────────────────────────────────
+    parser.add_argument(
+        "--email",
+        metavar="ADDRESS",
+        default=None,
+        help=(
+            "Send the HTML summary to this email address. "
+            "Multiple addresses can be separated by commas. "
+            "Requires SMTP credentials (see --smtp-* flags or env vars)."
+        ),
+    )
+    parser.add_argument(
+        "--smtp-host",
+        default=os.environ.get("SMTP_HOST", "smtp.gmail.com"),
+        help="SMTP server hostname (default: smtp.gmail.com).",
+    )
+    parser.add_argument(
+        "--smtp-port",
+        type=int,
+        default=int(os.environ.get("SMTP_PORT", "587")),
+        help="SMTP server port (default: 587 / STARTTLS).",
+    )
+    parser.add_argument(
+        "--smtp-user",
+        default=os.environ.get("SMTP_USER"),
+        help="SMTP login username / sender address (env: SMTP_USER).",
+    )
+    parser.add_argument(
+        "--smtp-password",
+        default=os.environ.get("SMTP_PASSWORD"),
+        help="SMTP password or App Password (env: SMTP_PASSWORD).",
+    )
     args = parser.parse_args(argv)
 
     # ── Build ticker list ──────────────────────────────────────────────────────
@@ -231,6 +272,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.output:
         suggestions.to_csv(args.output, index=False)
         logger.info("Full results saved to %s", args.output)
+
+    # ── Optional email delivery ────────────────────────────────────────────────
+    if args.email:
+        recipients = [addr.strip() for addr in args.email.split(",") if addr.strip()]
+        html = build_html_email(suggestions, exchange=args.exchange, top=args.top)
+        try:
+            send_email(
+                html,
+                recipients=recipients,
+                smtp_host=args.smtp_host,
+                smtp_port=args.smtp_port,
+                smtp_user=args.smtp_user,
+                smtp_password=args.smtp_password,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to send email: %s", exc)
+            return 1
 
     return 0
 
