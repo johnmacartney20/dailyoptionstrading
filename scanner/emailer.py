@@ -1,0 +1,176 @@
+"""Email delivery module.
+
+Composes an HTML email summarising the day's options suggestions and
+sends it via SMTP.  Supports Gmail (with an App Password) and any
+other SMTP relay that accepts STARTTLS on port 587.
+
+Environment variables (all optional; can also be passed directly):
+    SMTP_HOST     – defaults to smtp.gmail.com
+    SMTP_PORT     – defaults to 587
+    SMTP_USER     – sender email address
+    SMTP_PASSWORD – SMTP / App Password
+    EMAIL_TO      – comma-separated recipient addresses
+"""
+
+import logging
+import os
+import smtplib
+from datetime import date
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from typing import List, Optional
+
+import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+# ── HTML template helpers ─────────────────────────────────────────────────────
+
+_HTML_HEAD = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  body  {{ font-family: Arial, sans-serif; font-size: 13px; color: #222; }}
+  h1    {{ color: #1a5276; font-size: 20px; margin-bottom: 4px; }}
+  h2    {{ color: #1a5276; font-size: 15px; margin-top: 24px; border-bottom: 2px solid #1a5276; padding-bottom: 4px; }}
+  table {{ border-collapse: collapse; width: 100%; margin-top: 8px; }}
+  th    {{ background: #1a5276; color: #fff; padding: 6px 10px; text-align: left; font-size: 12px; }}
+  td    {{ padding: 5px 10px; border-bottom: 1px solid #ddd; }}
+  tr:nth-child(even) td {{ background: #f2f2f2; }}
+  .meta {{ color: #555; font-size: 12px; }}
+  .disc {{ font-size: 11px; color: #888; margin-top: 20px; border-top: 1px solid #ccc; padding-top: 8px; }}
+</style>
+</head>
+<body>
+<h1>📈 Daily Options Suggestions — {date}</h1>
+<p class="meta">Exchange(s): <strong>{exchange}</strong> &nbsp;|&nbsp;
+Total qualifying opportunities: <strong>{total}</strong></p>
+"""
+
+_HTML_FOOT = """
+<p class="disc">
+  Data source: Yahoo Finance (yfinance) – free public data.<br>
+  <strong>DISCLAIMER:</strong> These suggestions are <em>not</em> financial advice.
+  Always do your own research and consult a licensed adviser before trading options.
+</p>
+</body></html>"""
+
+_STRATEGY_LABELS = {
+    "call": "Covered Calls (sell call, own shares)",
+    "put": "Cash-Secured Puts (sell put, set aside cash)",
+}
+
+# Columns to include in the email table and their display names.
+_EMAIL_COLUMNS = {
+    "ticker": "Ticker",
+    "expiry": "Expiry",
+    "dte": "DTE",
+    "strike": "Strike",
+    "stock_price": "Stock $",
+    "bid": "Bid",
+    "ask": "Ask",
+    "openInterest": "OI",
+    "annualized_return": "Ann. Ret %",
+    "otm_pct": "OTM %",
+    "impliedVolatility": "IV %",
+    "score": "Score",
+}
+
+
+def _df_to_html_table(df: pd.DataFrame, top: int) -> str:
+    """Return an HTML ``<table>`` string from the top *n* rows of *df*."""
+    avail = {k: v for k, v in _EMAIL_COLUMNS.items() if k in df.columns}
+    display = df[list(avail.keys())].head(top).copy()
+    display.columns = list(avail.values())
+
+    # Format numbers
+    for col, decimals in [
+        ("Ann. Ret %", 1), ("Score", 1),
+        ("Stock $", 2), ("Strike", 2), ("Bid", 2), ("Ask", 2),
+    ]:
+        if col in display.columns:
+            display[col] = display[col].round(decimals)
+
+    if "OTM %" in display.columns:
+        display["OTM %"] = (display["OTM %"] * 100).round(1)
+    if "IV %" in display.columns:
+        display["IV %"] = (display["IV %"] * 100).round(1)
+
+    # Build HTML manually for consistent styling
+    headers = "".join(f"<th>{h}</th>" for h in display.columns)
+    rows = ""
+    for _, row in display.iterrows():
+        cells = "".join(f"<td>{v}</td>" for v in row)
+        rows += f"<tr>{cells}</tr>"
+
+    return f"<table><thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table>"
+
+
+def build_html_email(
+    suggestions: pd.DataFrame,
+    exchange: str,
+    top: int = 10,
+) -> str:
+    """Return a complete HTML email string for the given *suggestions* DataFrame."""
+    today = date.today().strftime("%Y-%m-%d")
+    html = _HTML_HEAD.format(date=today, exchange=exchange.upper(), total=len(suggestions))
+
+    for opt_type, label in _STRATEGY_LABELS.items():
+        sub = suggestions[suggestions["option_type"] == opt_type]
+        if sub.empty:
+            continue
+        html += f"<h2>{label}</h2>"
+        html += f"<p class='meta'>Showing top {min(len(sub), top)}</p>"
+        html += _df_to_html_table(sub, top)
+
+    html += _HTML_FOOT
+    return html
+
+
+def send_email(
+    html_body: str,
+    recipients: List[str],
+    smtp_host: str = "smtp.gmail.com",
+    smtp_port: int = 587,
+    smtp_user: Optional[str] = None,
+    smtp_password: Optional[str] = None,
+) -> None:
+    """Send *html_body* as an HTML email to *recipients* via STARTTLS SMTP.
+
+    Credentials fall back to the ``SMTP_USER`` / ``SMTP_PASSWORD`` environment
+    variables when not supplied directly.
+
+    Raises
+    ------
+    ValueError
+        When required SMTP credentials are missing.
+    smtplib.SMTPException
+        On any SMTP-level error.
+    """
+    user = smtp_user or os.environ.get("SMTP_USER", "")
+    password = smtp_password or os.environ.get("SMTP_PASSWORD", "")
+
+    if not user or not password:
+        raise ValueError(
+            "SMTP credentials are required. "
+            "Set SMTP_USER and SMTP_PASSWORD environment variables, "
+            "or pass smtp_user/smtp_password arguments."
+        )
+
+    today = date.today().strftime("%Y-%m-%d")
+    subject = f"Daily Options Suggestions — {today}"
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = user
+    msg["To"] = ", ".join(recipients)
+    msg.attach(MIMEText(html_body, "html"))
+
+    logger.info("Sending email to %s via %s:%s", recipients, smtp_host, smtp_port)
+    with smtplib.SMTP(smtp_host, smtp_port) as server:
+        server.ehlo()
+        server.starttls()
+        server.login(user, password)
+        server.sendmail(user, recipients, msg.as_string())
+    logger.info("Email sent successfully.")

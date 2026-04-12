@@ -1,0 +1,65 @@
+name: Daily Options Scan
+
+on:
+  # Runs at 13:30 UTC on weekdays = 9:30 AM Eastern Time (market open)
+  # Adjust the cron expression if you want a different time:
+  #   "30 14 * * 1-5"  = 10:30 AM ET
+  #   "0  21 * * 1-5"  = 5:00 PM ET (after-hours)
+  schedule:
+    - cron: "30 13 * * 1-5"
+
+  # Also allows triggering manually from the GitHub Actions tab
+  workflow_dispatch:
+    inputs:
+      exchange:
+        description: "Exchange to scan (tsx / nasdaq / all)"
+        required: false
+        default: "all"
+      strategy:
+        description: "Strategy filter (call / put / all)"
+        required: false
+        default: "all"
+      top:
+        description: "Number of top suggestions per strategy"
+        required: false
+        default: "10"
+
+jobs:
+  scan-and-email:
+    name: Scan options and email summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scanner and send email
+        env:
+          # ── Set these secrets in:
+          #    GitHub repo → Settings → Secrets and variables → Actions → New repository secret
+          #
+          # SMTP_USER     : your Gmail address  (e.g. yourname@gmail.com)
+          # SMTP_PASSWORD : Gmail App Password   (NOT your regular password)
+          #                 Generate one at https://myaccount.google.com/apppasswords
+          #                 (requires 2-Step Verification to be enabled on your Google account)
+          # EMAIL_TO      : recipient address(es), comma-separated (can be the same as SMTP_USER)
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: |
+          python main.py \
+            --exchange "${{ github.event.inputs.exchange || 'all' }}" \
+            --strategy "${{ github.event.inputs.strategy || 'all' }}" \
+            --top      "${{ github.event.inputs.top     || '10'  }}" \
+            --email    "${{ secrets.EMAIL_TO }}"
