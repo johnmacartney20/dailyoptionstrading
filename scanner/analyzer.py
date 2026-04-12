@@ -11,6 +11,15 @@ from datetime import date, datetime
 import pandas as pd
 
 
+def _safe_int(value, default: int = 0) -> int:
+    if value is None or pd.isna(value):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def calculate_dte(expiry_str: str) -> int:
     """Return calendar days from today to *expiry_str* (``"YYYY-MM-DD"`` format).
 
@@ -115,7 +124,7 @@ def enrich_options(
             row["bid"],
             row["strike"],
             dte,
-            int(row.get("openInterest", 0) or 0),
+            _safe_int(row.get("openInterest"), 0),
             float(row.get("impliedVolatility", 0.0) or 0.0),
         ),
         axis=1,
