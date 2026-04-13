@@ -2,7 +2,8 @@
 
 Pure-function helpers for computing metrics used to rank and filter options:
 days-to-expiration, out-of-the-money percentage, annualized return on capital,
-and a composite score.
+risk-adjusted return, suggested spread structure, and a composite score that
+prioritises high-probability, executable trades over raw annualised return.
 """
 
 import math
@@ -53,10 +54,6 @@ def calculate_annualized_return(bid: float, strike: float, dte: int) -> float:
 
     Formula: ``(bid / strike) × (365 / dte) × 100``
 
-    This represents the premium received as a percentage of the capital at risk
-    (the strike price for a cash-secured put, or the effective cost basis for a
-    covered call), scaled to a one-year horizon.
-
     Returns ``0.0`` when inputs are invalid.
     """
     if dte <= 0 or strike <= 0 or bid <= 0:
@@ -64,28 +61,122 @@ def calculate_annualized_return(bid: float, strike: float, dte: int) -> float:
     return (bid / strike) * (365.0 / dte) * 100.0
 
 
+def _spread_width(strike: float) -> float:
+    """Return an appropriate spread width (dollars) for a defined-risk spread.
+
+    Keeps the per-contract max loss within small-account limits:
+    * strike < $50  → $2.50 wide  (max loss ≈ $250)
+    * strike < $200 → $5.00 wide  (max loss ≈ $500)
+    * strike ≥ $200 → $10.00 wide (max loss ≈ $1,000)
+    """
+    if strike < 50:
+        return 2.5
+    if strike < 200:
+        return 5.0
+    return 10.0
+
+
+def calculate_risk_adjusted_return(bid: float, strike: float) -> float:
+    """Return the risk-adjusted return ratio for a short spread.
+
+    Defined as ``premium_received / max_loss_per_share`` where max loss is
+    ``spread_width - bid`` (a standard defined-risk spread).
+
+    Returns ``0.0`` when the inputs are invalid or the bid exceeds the spread
+    width (which would indicate a data anomaly).
+    """
+    width = _spread_width(strike)
+    max_loss = width - bid
+    if bid <= 0 or max_loss <= 0:
+        return 0.0
+    return bid / max_loss
+
+
+def suggest_spread_structure(strike: float, option_type: str) -> str:
+    """Return a human-readable spread structure string for a defined-risk trade.
+
+    Examples
+    --------
+    * put  at strike 95  → ``"Sell 95P / Buy 90P"``
+    * call at strike 105 → ``"Sell 105C / Buy 110C"``
+    """
+    width = _spread_width(strike)
+    if option_type == "put":
+        long_strike = strike - width
+        return f"Sell {strike:.0f}P / Buy {long_strike:.0f}P"
+    long_strike = strike + width
+    return f"Sell {strike:.0f}C / Buy {long_strike:.0f}C"
+
+
 def score_option(
     bid: float,
+    ask: float,
     strike: float,
-    dte: int,
+    stock_price: float,
     open_interest: int,
     implied_volatility: float,
+    otm_pct: float,
 ) -> float:
     """Return a composite score for ranking options (higher is better).
 
-    Components:
-    * **Annualized return** – primary driver of score (already reflects IV).
-    * **Liquidity bonus** – log-scaled open-interest bonus (max +20 points)
-      so that highly liquid options rank above similarly-priced illiquid ones.
+    The score is built from four components that collectively prioritise
+    high-probability, liquid, and risk-adjusted trades:
+
+    1. **Distance score** (0–40 pts): rewards strikes further OTM.
+       ATM or within 2 % OTM receive no credit; the sweet-spot is 3–5 %.
+    2. **Liquidity score** (0–25 pts): log-scaled open-interest bonus plus
+       a bid-ask spread bonus for tight markets.
+    3. **IV-edge score** (0–20 pts): rewards high implied-volatility
+       environments but penalises the combination of high IV and tight strike
+       distance (elevated gap-risk).
+    4. **Risk-adjusted return** (0–15 pts, capped): premium / max-loss on a
+       standard defined-risk spread rather than raw annualised return.
     """
-    ann_return = calculate_annualized_return(bid, strike, dte)
-    if ann_return == 0.0:
+    if bid <= 0 or strike <= 0:
         return 0.0
 
-    # Liquidity bonus: log10(OI+1) gives 0 for OI=0, ≈3 for OI=1000
-    oi_bonus = min(math.log10(max(open_interest, 1)) * 5.0, 20.0)
+    # ── 1. Distance score (0–40 pts) ─────────────────────────────────────────
+    if otm_pct < 0.02:
+        distance_score = 0.0
+    elif otm_pct < 0.03:
+        distance_score = 10.0 * (otm_pct - 0.02) / 0.01
+    elif otm_pct < 0.05:
+        distance_score = 10.0 + 20.0 * (otm_pct - 0.03) / 0.02
+    elif otm_pct <= 0.15:
+        distance_score = 30.0 + 10.0 * (otm_pct - 0.05) / 0.10
+    else:
+        distance_score = 40.0
 
-    return ann_return + oi_bonus
+    # ── 2. Liquidity score (0–25 pts) ────────────────────────────────────────
+    oi_score = min(math.log10(max(open_interest, 1)) * 8.0, 20.0)
+
+    spread_score = 0.0
+    if bid > 0 and ask > bid:
+        spread_pct = (ask - bid) / bid
+        if spread_pct < 0.05:
+            spread_score = 5.0
+        elif spread_pct < 0.10:
+            spread_score = 2.5
+
+    liquidity_score = oi_score + spread_score
+
+    # ── 3. IV-edge score (0–20 pts) ──────────────────────────────────────────
+    iv_base = min(implied_volatility * 40.0, 15.0)
+
+    iv_penalty = 0.0
+    if implied_volatility > 0.50 and otm_pct < 0.03:
+        iv_penalty = 10.0
+    elif implied_volatility > 0.40 and otm_pct < 0.03:
+        iv_penalty = 5.0
+
+    iv_env_bonus = 5.0 if implied_volatility >= 0.30 else 0.0
+    iv_edge_score = min(max(iv_base - iv_penalty, 0.0) + iv_env_bonus, 20.0)
+
+    # ── 4. Risk-adjusted return (0–15 pts, capped) ───────────────────────────
+    risk_adj = calculate_risk_adjusted_return(bid, strike)
+    risk_adj_score = min(risk_adj * 30.0, 15.0)
+
+    return distance_score + liquidity_score + iv_edge_score + risk_adj_score
 
 
 def enrich_options(
@@ -98,7 +189,9 @@ def enrich_options(
     """Add computed columns to a raw options DataFrame.
 
     Added columns: ``ticker``, ``option_type``, ``expiry``, ``dte``,
-    ``stock_price``, ``otm_pct``, ``annualized_return``, ``score``.
+    ``stock_price``, ``otm_pct``, ``annualized_return``,
+    ``bid_ask_spread_pct``, ``risk_adjusted_return``, ``max_spread_loss``,
+    ``spread_structure``, ``score``.
     """
     if df.empty:
         return df.copy()
@@ -119,14 +212,42 @@ def enrich_options(
         lambda row: calculate_annualized_return(row["bid"], row["strike"], dte),
         axis=1,
     )
+
+    # Bid-ask spread as a fraction of the bid price
+    out["bid_ask_spread_pct"] = out.apply(
+        lambda row: (row["ask"] - row["bid"]) / row["bid"]
+        if row.get("ask", 0) > 0 and row["bid"] > 0
+        else float("nan"),
+        axis=1,
+    )
+
+    out["risk_adjusted_return"] = out.apply(
+        lambda row: calculate_risk_adjusted_return(row["bid"], row["strike"]),
+        axis=1,
+    )
+
+    # Max loss per contract (in dollars) for the defined-risk spread
+    out["max_spread_loss"] = out.apply(
+        lambda row: max((_spread_width(row["strike"]) - row["bid"]) * 100.0, 0.0),
+        axis=1,
+    )
+
+    out["spread_structure"] = out.apply(
+        lambda row: suggest_spread_structure(row["strike"], option_type),
+        axis=1,
+    )
+
     out["score"] = out.apply(
         lambda row: score_option(
             row["bid"],
+            float(row.get("ask", 0.0) or 0.0),
             row["strike"],
-            dte,
+            stock_price,
             _safe_int(row.get("openInterest"), 0),
             float(row.get("impliedVolatility", 0.0) or 0.0),
+            row["otm_pct"],
         ),
         axis=1,
     )
     return out
+
