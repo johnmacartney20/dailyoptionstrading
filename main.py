@@ -112,9 +112,10 @@ def _print_suggestions(suggestions: pd.DataFrame, top: int) -> None:
         "bid": "Bid",
         "ask": "Ask",
         "openInterest": "OI",
-        "annualized_return": "Ann.Ret %",
         "otm_pct": "OTM %",
         "impliedVolatility": "IV %",
+        "risk_adjusted_return": "Risk-Adj",
+        "spread_structure": "Spread Structure",
         "score": "Score",
     }
 
@@ -134,7 +135,7 @@ def _print_suggestions(suggestions: pd.DataFrame, top: int) -> None:
 
         # Format numeric columns for readability
         for col, fmt in [
-            ("Ann.Ret %", 1),
+            ("Risk-Adj", 3),
             ("Score", 1),
             ("Stock $", 2),
             ("Strike", 2),

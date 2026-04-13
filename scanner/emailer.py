@@ -71,9 +71,10 @@ _EMAIL_COLUMNS = {
     "bid": "Bid",
     "ask": "Ask",
     "openInterest": "OI",
-    "annualized_return": "Ann. Ret %",
     "otm_pct": "OTM %",
     "impliedVolatility": "IV %",
+    "risk_adjusted_return": "Risk-Adj Ret",
+    "spread_structure": "Spread",
     "score": "Score",
 }
 
@@ -86,7 +87,7 @@ def _df_to_html_table(df: pd.DataFrame, top: int) -> str:
 
     # Format numbers
     for col, decimals in [
-        ("Ann. Ret %", 1), ("Score", 1),
+        ("Ann. Ret %", 1), ("Score", 1), ("Risk-Adj Ret", 3),
         ("Stock $", 2), ("Strike", 2), ("Bid", 2), ("Ask", 2),
     ]:
         if col in display.columns:

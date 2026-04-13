@@ -78,12 +78,22 @@ SCREENING_PARAMS = {
     "min_dte": 7,
     "max_dte": 60,
     # Minimum open interest (contracts) – ensures sufficient liquidity
-    "min_open_interest": 10,
+    "min_open_interest": 500,
+    # Maximum bid-ask spread as a fraction of the bid price (liquidity filter)
+    # 0.10 = spread must be less than 10 % of the bid
+    "max_bid_ask_spread_pct": 0.10,
     # Minimum bid price – filters out near-worthless options
     "min_bid": 0.05,
-    # Minimum annualized return on capital (percentage)
-    "min_annualized_return_pct": 10.0,
-    # Maximum out-of-the-money % relative to stock price
-    # 0.10 = options up to 10% OTM are considered
-    "max_otm_pct": 0.10,
+    # Minimum annualized return on capital (percentage) – kept as a floor only;
+    # primary ranking is now driven by the composite score
+    "min_annualized_return_pct": 5.0,
+    # OTM % window: favor strikes 3-15 % below (or above for calls) stock price.
+    # Trades within 3 % of the stock price are excluded (too close to ATM).
+    "min_otm_pct": 0.03,
+    "max_otm_pct": 0.15,
+    # Assumed spread width (dollars) used to compute max loss and spread structure.
+    # A $5-wide spread caps max loss at ~$500 per contract (small-account friendly).
+    "spread_width": 5.0,
+    # Maximum allowable max loss per spread contract (dollars)
+    "max_spread_loss": 1000.0,
 }
