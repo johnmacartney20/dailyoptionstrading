@@ -40,7 +40,7 @@ from scanner.data_fetcher import (
     get_stock_price,
 )
 from scanner.emailer import build_html_email, send_email
-from scanner.portfolio_allocator import PortfolioAllocation, allocate_portfolio
+from scanner.portfolio_allocator import PortfolioAllocation, TfsaAllocation, allocate_portfolio, allocate_tfsa_portfolio
 from scanner.suggester import generate_suggestions, screen_options
 
 # ── Logging ────────────────────────────────────────────────────────────────────
@@ -132,6 +132,58 @@ def _print_portfolio_allocation(portfolio: PortfolioAllocation) -> None:
     if portfolio.rejected:
         print(f"\n  Rejected top candidates:")
         for r in portfolio.rejected:
+            print(f"    • {r.ticker:<10}  score {r.score:5.1f}  —  {r.reason}")
+
+    print(f"{sep}\n")
+
+
+def _print_tfsa_allocation(tfsa: TfsaAllocation) -> None:
+    """Pretty-print the TFSA allocation summary to stdout."""
+    sep = "=" * 88
+    dash = "-" * 88
+
+    print(f"\n{sep}")
+    print("  TFSA ALLOCATION  —  Long Calls & Call Debit Spreads")
+    print(sep)
+    print("  Strategy    : Call Debit Spreads  (no short premium — TFSA-compatible)")
+    print("  Ranking     : Expected upside potential  (not probability of profit)")
+    print(f"  Trades      : {tfsa.num_open_trades} high-conviction trade(s)")
+    print(f"  Deployed    : ${tfsa.total_deployed:,.2f}")
+    print()
+
+    if tfsa.selected:
+        headers = [
+            "Ticker", "Sector", "Strategy", "Buy", "Sell", "Expiry",
+            "Score", "Max Profit", "Max Loss", "Allocation", "% Port",
+        ]
+        col_w = [7, 14, 19, 7, 7, 12, 7, 11, 9, 12, 7]
+
+        header_row = "  " + "  ".join(h.ljust(col_w[i]) for i, h in enumerate(headers))
+        print(header_row)
+        print("  " + dash[:len(header_row) - 2])
+
+        for t in tfsa.selected:
+            row = [
+                t.ticker,
+                t.sector,
+                t.strategy_type,
+                f"${t.buy_strike:.2f}",
+                f"${t.sell_strike:.2f}",
+                t.expiration,
+                f"{t.tfsa_score:.1f}",
+                f"${t.max_profit:.2f}",
+                f"${t.max_loss:.2f}",
+                f"${t.allocation:,.2f}",
+                f"{t.pct_of_portfolio:.1f}%",
+            ]
+            print("  " + "  ".join(str(v).ljust(col_w[i]) for i, v in enumerate(row)))
+
+    else:
+        print("  No qualifying call debit spreads found for TFSA allocation.")
+
+    if tfsa.rejected:
+        print(f"\n  Rejected top candidates:")
+        for r in tfsa.rejected:
             print(f"    • {r.ticker:<10}  score {r.score:5.1f}  —  {r.reason}")
 
     print(f"{sep}\n")
@@ -251,6 +303,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         help="Optional path to save full results as CSV.",
     )
+    parser.add_argument(
+        "--tfsa",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable TFSA-compatible strategy mode: exclude all short premium "
+            "strategies and output a separate 'TFSA Allocation' section with "
+            "1–2 high-conviction call debit spread trades ranked by upside potential."
+        ),
+    )
     # ── Email options ──────────────────────────────────────────────────────────
     parser.add_argument(
         "--email",
@@ -320,6 +382,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     # ── Display ────────────────────────────────────────────────────────────────
     portfolio = allocate_portfolio(suggestions)
     _print_portfolio_allocation(portfolio)
+
+    tfsa: Optional[TfsaAllocation] = None
+    if args.tfsa:
+        tfsa = allocate_tfsa_portfolio(suggestions)
+        _print_tfsa_allocation(tfsa)
+
     _print_suggestions(suggestions, top=args.top)
 
     # ── Optional CSV export ────────────────────────────────────────────────────
@@ -330,7 +398,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     # ── Optional email delivery ────────────────────────────────────────────────
     if args.email:
         recipients = [addr.strip() for addr in args.email.split(",") if addr.strip()]
-        html = build_html_email(suggestions, exchange=args.exchange, top=args.top, portfolio=portfolio)
+        html = build_html_email(
+            suggestions,
+            exchange=args.exchange,
+            top=args.top,
+            portfolio=portfolio,
+            tfsa_allocation=tfsa,
+        )
         try:
             send_email(
                 html,

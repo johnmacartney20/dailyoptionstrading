@@ -108,6 +108,98 @@ def suggest_spread_structure(strike: float, option_type: str) -> str:
     return f"Sell {strike:.0f}C / Buy {long_strike:.0f}C"
 
 
+def suggest_call_debit_spread(strike: float) -> str:
+    """Return a human-readable call debit spread string (long the lower strike).
+
+    This is the TFSA-appropriate structure: buy the call at *strike*, sell a
+    higher-strike call to cap cost and define maximum risk.
+
+    Example
+    -------
+    * strike 105 → ``"Buy 105C / Sell 110C"``
+    """
+    width = _spread_width(strike)
+    sell_strike = strike + width
+    return f"Buy {strike:.0f}C / Sell {sell_strike:.0f}C"
+
+
+def score_option_tfsa(
+    ask: float,
+    strike: float,
+    stock_price: float,
+    open_interest: int,
+    implied_volatility: float,
+    otm_pct: float,
+) -> float:
+    """Return a composite TFSA score for ranking long-call candidates (higher is better).
+
+    Unlike :func:`score_option`, which rewards premium *sellers*, this score
+    rewards trades with **asymmetric upside and defined risk** – suitable for a
+    TFSA where short premium is not permitted.  Components:
+
+    1. **Upside ratio** (0–35 pts): ``(spread_width − ask) / ask`` for a call
+       debit spread.  A higher ratio means more potential profit per dollar
+       risked.
+    2. **OTM sweet-spot** (0–30 pts): rewards strikes 3–10 % OTM, where call
+       debit spreads offer the best leverage-vs-probability balance.
+    3. **Liquidity** (0–20 pts): log-scaled open-interest bonus (same as the
+       standard scorer) rewarding depth and participation.
+    4. **IV momentum** (0–15 pts): moderate-to-high IV signals potential for a
+       large directional move; very high IV is penalised slightly because it
+       inflates the premium cost.
+
+    Returns ``0.0`` when inputs are invalid or the ask exceeds the spread width
+    (no positive upside).
+    """
+    if ask <= 0 or strike <= 0:
+        return 0.0
+
+    width = _spread_width(strike)
+    max_profit = width - ask
+    if max_profit <= 0:
+        return 0.0
+
+    # ── 1. Upside ratio (0–35 pts) ────────────────────────────────────────────
+    upside_ratio = max_profit / ask
+    if upside_ratio < 0.5:
+        upside_score = upside_ratio * 20.0
+    elif upside_ratio < 2.0:
+        upside_score = 10.0 + (upside_ratio - 0.5) / 1.5 * 15.0
+    else:
+        upside_score = min(25.0 + (upside_ratio - 2.0) * 5.0, 35.0)
+
+    # ── 2. OTM sweet-spot (0–30 pts) ─────────────────────────────────────────
+    if otm_pct < 0:
+        otm_score = 0.0
+    elif otm_pct < 0.02:
+        otm_score = 5.0 * otm_pct / 0.02
+    elif otm_pct < 0.05:
+        otm_score = 5.0 + 20.0 * (otm_pct - 0.02) / 0.03
+    elif otm_pct < 0.10:
+        otm_score = 25.0 + 5.0 * (otm_pct - 0.05) / 0.05
+    elif otm_pct <= 0.15:
+        otm_score = 30.0 - 10.0 * (otm_pct - 0.10) / 0.05
+    else:
+        otm_score = 20.0
+
+    # ── 3. Liquidity (0–20 pts) ───────────────────────────────────────────────
+    liquidity_score = min(
+        max(math.log10(max(open_interest, 1)) - 1.5, 0.0) * 9.0, 20.0
+    )
+
+    # ── 4. IV momentum (0–15 pts) ─────────────────────────────────────────────
+    if implied_volatility < 0.20:
+        iv_score = 0.0
+    elif implied_volatility < 0.35:
+        iv_score = (implied_volatility - 0.20) / 0.15 * 8.0
+    elif implied_volatility < 0.55:
+        iv_score = 8.0 + (implied_volatility - 0.35) / 0.20 * 7.0
+    else:
+        iv_score = max(15.0 - (implied_volatility - 0.55) * 10.0, 10.0)
+
+    return upside_score + otm_score + liquidity_score + iv_score
+
+
 def score_option(
     bid: float,
     ask: float,
@@ -273,5 +365,24 @@ def enrich_options(
         ),
         axis=1,
     )
+
+    # ── TFSA-specific columns (populated for calls only) ──────────────────────
+    if option_type == "call":
+        out["tfsa_score"] = out.apply(
+            lambda row: score_option_tfsa(
+                float(row.get("ask", 0.0) or 0.0),
+                row["strike"],
+                stock_price,
+                _safe_int(row.get("openInterest"), 0),
+                float(row.get("impliedVolatility", 0.0) or 0.0),
+                row["otm_pct"],
+            ),
+            axis=1,
+        )
+        out["tfsa_spread"] = out["strike"].apply(suggest_call_debit_spread)
+    else:
+        out["tfsa_score"] = 0.0
+        out["tfsa_spread"] = ""
+
     return out
 

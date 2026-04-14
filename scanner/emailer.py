@@ -22,7 +22,7 @@ from typing import List, Optional
 
 import pandas as pd
 
-from .portfolio_allocator import PortfolioAllocation
+from .portfolio_allocator import PortfolioAllocation, TfsaAllocation
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,13 @@ _HTML_HEAD = """<!DOCTYPE html>
   .port-summary strong {{ color: #1a5276; }}
   .port-rejected {{ font-size: 11px; color: #666; margin-top: 10px; }}
   .port-rejected li {{ margin: 2px 0; }}
+  .tfsa-box {{ background: #eafaf1; border: 1px solid #1e8449; border-radius: 4px; padding: 12px 16px; margin-bottom: 20px; }}
+  .tfsa-box h2 {{ color: #1e8449; border-bottom-color: #1e8449; }}
+  .tfsa-summary {{ font-size: 12px; color: #333; margin-bottom: 8px; }}
+  .tfsa-summary strong {{ color: #1e8449; }}
+  .tfsa-meta {{ font-size: 11px; color: #555; margin-bottom: 6px; }}
+  .tfsa-rejected {{ font-size: 11px; color: #666; margin-top: 10px; }}
+  .tfsa-rejected li {{ margin: 2px 0; }}
 </style>
 </head>
 <body>
@@ -165,11 +172,68 @@ def _portfolio_to_html(portfolio: PortfolioAllocation) -> str:
     return html
 
 
+def _tfsa_allocation_to_html(tfsa: TfsaAllocation) -> str:
+    """Return an HTML snippet summarising the TFSA allocation."""
+    html = '<div class="tfsa-box">'
+    html += "<h2>🇨🇦 TFSA Allocation — Call Debit Spreads (Defined Risk)</h2>"
+    html += (
+        '<p class="tfsa-meta">'
+        "Strategy: <strong>Call Debit Spreads</strong> &nbsp;|&nbsp; "
+        "Ranking: <strong>Expected upside potential</strong> (not probability of profit)"
+        "</p>"
+    )
+    html += (
+        f'<p class="tfsa-summary">'
+        f"Total deployed: <strong>${tfsa.total_deployed:,.2f}</strong>"
+        f" &nbsp;|&nbsp; High-conviction trades: <strong>{tfsa.num_open_trades}</strong>"
+        f"</p>"
+    )
+
+    if tfsa.selected:
+        cols = [
+            "Ticker", "Sector", "Strategy", "Buy Strike", "Sell Strike",
+            "Expiry", "Score", "Max Profit", "Max Loss", "Allocation", "% Portfolio",
+        ]
+        headers = "".join(f"<th>{h}</th>" for h in cols)
+        rows_html = ""
+        for t in tfsa.selected:
+            cells = "".join(
+                f"<td>{v}</td>"
+                for v in [
+                    t.ticker,
+                    t.sector,
+                    t.strategy_type,
+                    f"${t.buy_strike:.2f}",
+                    f"${t.sell_strike:.2f}",
+                    t.expiration,
+                    f"{t.tfsa_score:.1f}",
+                    f"${t.max_profit:.2f}",
+                    f"${t.max_loss:.2f}",
+                    f"${t.allocation:,.2f}",
+                    f"{t.pct_of_portfolio:.1f}%",
+                ]
+            )
+            rows_html += f"<tr>{cells}</tr>"
+        html += f"<table><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table>"
+    else:
+        html += "<p>No qualifying call debit spreads found for TFSA allocation.</p>"
+
+    if tfsa.rejected:
+        html += '<div class="tfsa-rejected"><strong>Rejected top candidates:</strong><ul>'
+        for r in tfsa.rejected:
+            html += f"<li><strong>{r.ticker}</strong> (score {r.score:.1f}) — {r.reason}</li>"
+        html += "</ul></div>"
+
+    html += "</div>"
+    return html
+
+
 def build_html_email(
     suggestions: pd.DataFrame,
     exchange: str,
     top: int = 10,
     portfolio: Optional[PortfolioAllocation] = None,
+    tfsa_allocation: Optional[TfsaAllocation] = None,
 ) -> str:
     """Return a complete HTML email string for the given *suggestions* DataFrame."""
     today = date.today().strftime("%Y-%m-%d")
@@ -177,6 +241,9 @@ def build_html_email(
 
     if portfolio is not None:
         html += _portfolio_to_html(portfolio)
+
+    if tfsa_allocation is not None:
+        html += _tfsa_allocation_to_html(tfsa_allocation)
 
     for opt_type, label in _STRATEGY_LABELS.items():
         sub = suggestions[suggestions["option_type"] == opt_type]

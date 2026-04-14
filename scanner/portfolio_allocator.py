@@ -12,6 +12,8 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from .analyzer import _spread_width, suggest_call_debit_spread
+
 # ── Sector mapping ─────────────────────────────────────────────────────────────
 TICKER_SECTORS: Dict[str, str] = {
     # TSX – Financials
@@ -131,6 +133,40 @@ class PortfolioAllocation:
         return len(self.selected)
 
 
+@dataclass
+class TfsaTradeAllocation:
+    """Details for a single accepted TFSA trade (long call / call debit spread)."""
+
+    ticker: str
+    sector: str
+    strategy_type: str      # "Call Debit Spread"
+    buy_strike: float       # lower-strike call we buy
+    sell_strike: float      # higher-strike call we sell (defines the cap)
+    expiration: str
+    tfsa_score: float
+    max_profit: float       # per contract (dollars) = (width − ask) × 100
+    max_loss: float         # per contract (dollars) = ask × 100
+    allocation: float       # dollar amount allocated
+    pct_of_portfolio: float  # 0–100
+
+
+@dataclass
+class TfsaAllocation:
+    """Full TFSA portfolio allocation result."""
+
+    total_capital: float
+    selected: List[TfsaTradeAllocation] = field(default_factory=list)
+    rejected: List[RejectedCandidate] = field(default_factory=list)
+
+    @property
+    def total_deployed(self) -> float:
+        return round(sum(t.allocation for t in self.selected), 2)
+
+    @property
+    def num_open_trades(self) -> int:
+        return len(self.selected)
+
+
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
 def _get_sector(ticker: str) -> str:
@@ -151,6 +187,17 @@ def _parse_long_strike(spread_structure: str) -> Optional[float]:
     E.g. ``"Sell 95P / Buy 90P"`` → ``90.0``
     """
     match = re.search(r"Buy\s+([\d.]+)[PC]", spread_structure, re.IGNORECASE)
+    if match:
+        return float(match.group(1))
+    return None
+
+
+def _parse_sell_strike_tfsa(spread_structure: str) -> Optional[float]:
+    """Extract the sell-leg strike from a TFSA call debit spread string.
+
+    E.g. ``"Buy 105C / Sell 110C"`` → ``110.0``
+    """
+    match = re.search(r"Sell\s+([\d.]+)[PC]", spread_structure, re.IGNORECASE)
     if match:
         return float(match.group(1))
     return None
@@ -308,6 +355,142 @@ def allocate_portfolio(
                 long_strike=long_strike,
                 expiration=str(row.get("expiry", "")),
                 score=float(row.get("score", 0.0)),
+                max_profit=round(max_profit_per_contract, 2),
+                max_loss=round(max_loss_per_contract, 2),
+                allocation=round(alloc, 2),
+                pct_of_portfolio=round(alloc / total_capital * 100, 1),
+            )
+        )
+
+    return result
+
+
+def allocate_tfsa_portfolio(
+    suggestions: pd.DataFrame,
+    total_capital: float = 1000.0,
+    max_trades: int = 2,
+    max_position_pct: float = 0.60,
+) -> TfsaAllocation:
+    """Select 1–2 high-conviction call debit spread trades for a TFSA account.
+
+    TFSA constraints applied here:
+    * **Calls only** – no put selling or credit spreads.
+    * **Ranked by ``tfsa_score``** (expected upside potential) rather than
+      probability of profit.
+    * **Defined risk**: max loss per trade is capped at the net debit paid.
+    * At most *max_trades* (default 2) simultaneous positions.
+
+    Selection rules (same diversity filters as :func:`allocate_portfolio`):
+    1. Calls only, ranked by ``tfsa_score`` descending (falls back to ``score``
+       when ``tfsa_score`` is absent).
+    2. Skip duplicate tickers.
+    3. Skip tickers highly correlated with an already-selected trade.
+    4. Skip tickers whose sector is already represented.
+
+    Parameters
+    ----------
+    suggestions:
+        Full ranked suggestions DataFrame from
+        :func:`~scanner.suggester.generate_suggestions`.
+    total_capital:
+        Total dollars to deploy (default ``1000.0``).
+    max_trades:
+        Maximum number of simultaneous TFSA trades (default ``2``).
+    max_position_pct:
+        Maximum fraction of *total_capital* per single trade (default ``0.60``).
+
+    Returns
+    -------
+    :class:`TfsaAllocation`
+    """
+    result = TfsaAllocation(total_capital=total_capital)
+
+    if suggestions.empty:
+        return result
+
+    calls = suggestions[suggestions["option_type"] == "call"].copy()
+    if calls.empty:
+        return result
+
+    sort_col = "tfsa_score" if "tfsa_score" in calls.columns else "score"
+    calls = calls.sort_values(sort_col, ascending=False).reset_index(drop=True)
+
+    selected_rows: List[pd.Series] = []
+    selected_tickers: List[str] = []
+    selected_sectors: List[str] = []
+
+    candidate_pool = calls.head(max(max_trades * 5, 10))
+
+    for _, row in candidate_pool.iterrows():
+        if len(selected_rows) >= max_trades:
+            break
+
+        ticker = str(row["ticker"])
+        sector = _get_sector(ticker)
+        row_score = float(row.get(sort_col, 0.0))
+
+        if ticker in selected_tickers:
+            result.rejected.append(
+                RejectedCandidate(ticker, row_score, "duplicate ticker")
+            )
+            continue
+
+        correlated_with = next(
+            (t for t in selected_tickers if _are_correlated(ticker, t)), None
+        )
+        if correlated_with:
+            result.rejected.append(
+                RejectedCandidate(
+                    ticker, row_score, f"high correlation with {correlated_with}"
+                )
+            )
+            continue
+
+        if sector in selected_sectors:
+            result.rejected.append(
+                RejectedCandidate(ticker, row_score, "duplicate sector exposure")
+            )
+            continue
+
+        selected_rows.append(row)
+        selected_tickers.append(ticker)
+        selected_sectors.append(sector)
+
+    if not selected_rows:
+        return result
+
+    # ── Capital allocation ────────────────────────────────────────────────────
+    scores = [float(r.get(sort_col, 0.0)) for r in selected_rows]
+    allocations = _score_weighted_allocation(scores, total_capital, max_position_pct)
+
+    for row, alloc in zip(selected_rows, allocations):
+        ticker = str(row["ticker"])
+        sector = _get_sector(ticker)
+
+        # Use the pre-computed TFSA spread structure when available
+        spread_struct = str(row.get("tfsa_spread", ""))
+        if not spread_struct:
+            spread_struct = suggest_call_debit_spread(float(row["strike"]))
+
+        buy_strike = float(row["strike"])
+        sell_strike = _parse_sell_strike_tfsa(spread_struct) or (
+            buy_strike + _spread_width(buy_strike)
+        )
+
+        ask = float(row.get("ask", 0.0))
+        width = sell_strike - buy_strike
+        max_profit_per_contract = max((width - ask) * 100.0, 0.0)
+        max_loss_per_contract = ask * 100.0
+
+        result.selected.append(
+            TfsaTradeAllocation(
+                ticker=ticker,
+                sector=sector,
+                strategy_type="Call Debit Spread",
+                buy_strike=buy_strike,
+                sell_strike=sell_strike,
+                expiration=str(row.get("expiry", "")),
+                tfsa_score=float(row.get(sort_col, 0.0)),
                 max_profit=round(max_profit_per_contract, 2),
                 max_loss=round(max_loss_per_contract, 2),
                 allocation=round(alloc, 2),

@@ -34,6 +34,8 @@ OUTPUT_COLUMNS = [
     "max_spread_loss",
     "spread_structure",
     "score",
+    "tfsa_score",
+    "tfsa_spread",
     "inTheMoney",
     "contractSymbol",
 ]
