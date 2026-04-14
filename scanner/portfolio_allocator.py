@@ -6,6 +6,7 @@ per-trade and per-sector concentration limits and inter-trade correlation
 exclusions.
 """
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -13,6 +14,8 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from .analyzer import _spread_width, suggest_call_debit_spread
+
+logger = logging.getLogger(__name__)
 
 # ── Sector mapping ─────────────────────────────────────────────────────────────
 TICKER_SECTORS: Dict[str, str] = {
@@ -470,6 +473,10 @@ def allocate_tfsa_portfolio(
         # Use the pre-computed TFSA spread structure when available
         spread_struct = str(row.get("tfsa_spread", ""))
         if not spread_struct:
+            logger.debug(
+                "tfsa_spread missing for %s – computing from strike %s",
+                ticker, row["strike"],
+            )
             spread_struct = suggest_call_debit_spread(float(row["strike"]))
 
         buy_strike = float(row["strike"])
