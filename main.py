@@ -4,6 +4,10 @@
 Scans public free data from Yahoo Finance for options trading opportunities
 on the TSX (Toronto Stock Exchange) and NASDAQ.
 
+Both the non-registered portfolio allocation (bull put spreads) and the
+TFSA-compatible allocation (call debit spreads) are always computed in
+parallel and included in every run and email summary.
+
 Usage examples
 --------------
   # Scan all exchanges (default)
@@ -28,6 +32,7 @@ import logging
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from typing import List, Optional
 
@@ -303,16 +308,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         help="Optional path to save full results as CSV.",
     )
-    parser.add_argument(
-        "--tfsa",
-        action="store_true",
-        default=False,
-        help=(
-            "Enable TFSA-compatible strategy mode: exclude all short premium "
-            "strategies and output a separate 'TFSA Allocation' section with "
-            "1–2 high-conviction call debit spread trades ranked by upside potential."
-        ),
-    )
     # ── Email options ──────────────────────────────────────────────────────────
     parser.add_argument(
         "--email",
@@ -380,13 +375,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         suggestions = suggestions[suggestions["option_type"] == args.strategy]
 
     # ── Display ────────────────────────────────────────────────────────────────
-    portfolio = allocate_portfolio(suggestions)
-    _print_portfolio_allocation(portfolio)
+    # Both allocations are independent — run them in parallel.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        fut_portfolio = executor.submit(allocate_portfolio, suggestions)
+        fut_tfsa = executor.submit(allocate_tfsa_portfolio, suggestions)
+        portfolio = fut_portfolio.result()
+        tfsa = fut_tfsa.result()
 
-    tfsa: Optional[TfsaAllocation] = None
-    if args.tfsa:
-        tfsa = allocate_tfsa_portfolio(suggestions)
-        _print_tfsa_allocation(tfsa)
+    _print_portfolio_allocation(portfolio)
+    _print_tfsa_allocation(tfsa)
 
     _print_suggestions(suggestions, top=args.top)
 
