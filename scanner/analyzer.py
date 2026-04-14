@@ -120,35 +120,51 @@ def score_option(
     """Return a composite score for ranking options (higher is better).
 
     The score is built from four components that collectively prioritise
-    high-probability, liquid, and risk-adjusted trades:
+    high-probability, liquid, and risk-adjusted trades.  The thresholds are
+    calibrated so that typical trades span roughly 15–95 pts, avoiding
+    compression at the top end:
 
     1. **Distance score** (0–40 pts): rewards strikes further OTM.
-       ATM or within 2 % OTM receive no credit; the sweet-spot is 3–5 %.
-    2. **Liquidity score** (0–25 pts): log-scaled open-interest bonus plus
-       a bid-ask spread bonus for tight markets.
+       ATM or within 2 % OTM receive no credit.  The reward ramp is
+       intentionally shallow in the 2–5 % zone and steepens past 5 %,
+       requiring 20 %+ OTM to reach the ceiling.
+    2. **Liquidity score** (up to 25 pts, can be slightly negative for very
+       wide markets): log-scaled open-interest bonus — requires OI ≥ ~8 000
+       to hit the 20-pt ceiling (vs. OI ~316 previously) — plus a bid-ask
+       spread bonus for tight markets and a −3 pt penalty for very wide
+       markets (spread > 25 % of bid).
     3. **IV-edge score** (0–20 pts): rewards high implied-volatility
-       environments but penalises the combination of high IV and tight strike
-       distance (elevated gap-risk).
+       environments but penalises the combination of elevated IV *and* tight
+       strike distance (elevated gap-risk).  The penalty now applies when
+       OTM < 4 % (was 3 %) and has three tiers; the environmental bonus
+       requires IV ≥ 0.35 (was 0.30).
     4. **Risk-adjusted return** (0–15 pts, capped): premium / max-loss on a
-       standard defined-risk spread rather than raw annualised return.
+       standard defined-risk spread.  Low-credit trades (ratio < 0.15)
+       receive a steeper penalty than before; the cap is only reached at a
+       ratio ≥ ~0.55.
     """
     if bid <= 0 or strike <= 0:
         return 0.0
 
     # ── 1. Distance score (0–40 pts) ─────────────────────────────────────────
+    # Shallow ramp in the 2–5 % zone enforces stronger penalties for tight
+    # strikes; the reward accelerates past 5 % and plateaus only at 20 % OTM.
     if otm_pct < 0.02:
         distance_score = 0.0
     elif otm_pct < 0.03:
-        distance_score = 10.0 * (otm_pct - 0.02) / 0.01
+        distance_score = 5.0 * (otm_pct - 0.02) / 0.01
     elif otm_pct < 0.05:
-        distance_score = 10.0 + 20.0 * (otm_pct - 0.03) / 0.02
-    elif otm_pct <= 0.15:
-        distance_score = 30.0 + 10.0 * (otm_pct - 0.05) / 0.10
+        distance_score = 5.0 + 15.0 * (otm_pct - 0.03) / 0.02
+    elif otm_pct < 0.10:
+        distance_score = 20.0 + 13.0 * (otm_pct - 0.05) / 0.05
+    elif otm_pct <= 0.20:
+        distance_score = 33.0 + 7.0 * (otm_pct - 0.10) / 0.10
     else:
         distance_score = 40.0
 
-    # ── 2. Liquidity score (0–25 pts) ────────────────────────────────────────
-    oi_score = min(math.log10(max(open_interest, 1)) * 8.0, 20.0)
+    # ── 2. Liquidity score (up to 25 pts) ────────────────────────────────────
+    # OI bar raised: OI < ~32 → 0 pts; OI ~8 000 → 20 pts (old ceiling at 316).
+    oi_score = min(max(math.log10(max(open_interest, 1)) - 1.5, 0.0) * 9.0, 20.0)
 
     spread_score = 0.0
     if bid > 0 and ask > bid:
@@ -157,6 +173,8 @@ def score_option(
             spread_score = 5.0
         elif spread_pct < 0.10:
             spread_score = 2.5
+        elif spread_pct > 0.25:
+            spread_score = -3.0
 
     liquidity_score = oi_score + spread_score
 
@@ -164,17 +182,23 @@ def score_option(
     iv_base = min(implied_volatility * 40.0, 15.0)
 
     iv_penalty = 0.0
-    if implied_volatility > 0.50 and otm_pct < 0.03:
-        iv_penalty = 10.0
-    elif implied_volatility > 0.40 and otm_pct < 0.03:
-        iv_penalty = 5.0
+    if implied_volatility > 0.50 and otm_pct < 0.04:
+        iv_penalty = 12.0
+    elif implied_volatility > 0.40 and otm_pct < 0.04:
+        iv_penalty = 8.0
+    elif implied_volatility > 0.30 and otm_pct < 0.04:
+        iv_penalty = 4.0
 
-    iv_env_bonus = 5.0 if implied_volatility >= 0.30 else 0.0
+    iv_env_bonus = 5.0 if implied_volatility >= 0.35 else 0.0
     iv_edge_score = min(max(iv_base - iv_penalty, 0.0) + iv_env_bonus, 20.0)
 
     # ── 4. Risk-adjusted return (0–15 pts, capped) ───────────────────────────
+    # Steeper ramp-up below 0.15 ratio; cap reached only at ratio ≥ ~0.55.
     risk_adj = calculate_risk_adjusted_return(bid, strike)
-    risk_adj_score = min(risk_adj * 30.0, 15.0)
+    if risk_adj < 0.15:
+        risk_adj_score = risk_adj * 20.0
+    else:
+        risk_adj_score = min(3.0 + (risk_adj - 0.15) * 30.0, 15.0)
 
     return distance_score + liquidity_score + iv_edge_score + risk_adj_score
 

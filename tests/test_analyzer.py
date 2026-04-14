@@ -266,3 +266,94 @@ def test_enrich_options_empty_df():
     result = enrich_options(pd.DataFrame(), 100.0, "put", expiry, "AAPL")
     assert result.empty
 
+
+# ── score differentiation ─────────────────────────────────────────────────────
+
+
+def _base_kwargs(**overrides):
+    """Return a full set of valid score_option kwargs with optional overrides."""
+    defaults = dict(
+        bid=1.5,
+        ask=1.6,
+        strike=100.0,
+        stock_price=100.0,
+        open_interest=3000,
+        implied_volatility=0.40,
+        otm_pct=0.07,
+    )
+    defaults.update(overrides)
+    return defaults
+
+
+def test_score_range_weak_vs_excellent():
+    """Weak and excellent trades should have a wide score gap (≥ 40 pts)."""
+    weak = score_option(
+        bid=0.10, ask=0.30, strike=100.0, stock_price=100.0,
+        open_interest=80, implied_volatility=0.20, otm_pct=0.025,
+    )
+    excellent = score_option(
+        bid=3.00, ask=3.05, strike=100.0, stock_price=100.0,
+        open_interest=15000, implied_volatility=0.50, otm_pct=0.12,
+    )
+    assert excellent - weak >= 40.0
+
+
+def test_score_excellent_below_ceiling():
+    """Even an excellent trade should not hit the theoretical 100-pt ceiling."""
+    excellent = score_option(
+        bid=3.00, ask=3.05, strike=100.0, stock_price=100.0,
+        open_interest=15000, implied_volatility=0.50, otm_pct=0.12,
+    )
+    assert excellent < 100.0
+
+
+def test_score_low_oi_strongly_penalised():
+    """Low OI (< 100) should score significantly less than moderate OI (≥ 2 000)."""
+    s_low = score_option(**_base_kwargs(open_interest=50))
+    s_mod = score_option(**_base_kwargs(open_interest=2000))
+    assert s_mod - s_low >= 10.0
+
+
+def test_score_wide_spread_penalised():
+    """A very wide bid-ask spread (> 25 % of bid) scores below a tight market."""
+    s_tight = score_option(**_base_kwargs(ask=1.55))   # ~3 % spread
+    s_wide = score_option(**_base_kwargs(ask=2.20))    # ~47 % spread
+    assert s_tight > s_wide
+
+
+def test_score_tight_strike_strongly_penalised():
+    """OTM < 2 % should score far below a comfortable 7 % OTM strike."""
+    s_tight = score_option(**_base_kwargs(otm_pct=0.015))
+    s_safe = score_option(**_base_kwargs(otm_pct=0.07))
+    assert s_safe - s_tight >= 10.0
+
+
+def test_score_low_credit_penalised():
+    """Very low credit relative to risk (ratio < 0.15) scores below decent credit."""
+    # bid=0.05 → risk_adj ≈ 0.01, well below 0.15 threshold
+    s_low = score_option(**_base_kwargs(bid=0.05, ask=0.15))
+    # bid=1.50 → risk_adj ≈ 0.43
+    s_ok = score_option(**_base_kwargs(bid=1.50, ask=1.60))
+    assert s_ok > s_low
+
+
+def test_score_iv_tight_strike_penalty_extended_to_4pct():
+    """High IV with OTM between 3–4 % should still be penalised (new threshold)."""
+    s_penalised = score_option(
+        bid=1.0, ask=1.1, strike=100.0, stock_price=100.0,
+        open_interest=1000, implied_volatility=0.55, otm_pct=0.035,
+    )
+    s_safe = score_option(
+        bid=1.0, ask=1.1, strike=100.0, stock_price=100.0,
+        open_interest=1000, implied_volatility=0.55, otm_pct=0.06,
+    )
+    assert s_safe > s_penalised
+
+
+def test_score_iv_env_bonus_requires_35pct():
+    """Environmental IV bonus should only apply when IV ≥ 0.35 (raised from 0.30)."""
+    s_below = score_option(**_base_kwargs(implied_volatility=0.30, otm_pct=0.07))
+    s_above = score_option(**_base_kwargs(implied_volatility=0.35, otm_pct=0.07))
+    # The 5-pt env bonus should make IV=0.35 score higher than IV=0.30
+    assert s_above > s_below
+
