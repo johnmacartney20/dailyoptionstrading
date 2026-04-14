@@ -1,12 +1,12 @@
 name: Daily Options Scan
 
 on:
-  # Runs at 13:30 UTC on weekdays = 9:30 AM Eastern Time (market open)
+  # Runs at 14:30 UTC on weekdays = 10:30 AM Eastern Time (EDT, UTC-4)
   # Adjust the cron expression if you want a different time:
-  #   "30 14 * * 1-5"  = 10:30 AM ET
+  #   "30 13 * * 1-5"  = 9:30 AM ET
   #   "0  21 * * 1-5"  = 5:00 PM ET (after-hours)
   schedule:
-    - cron: "30 13 * * 1-5"
+    - cron: "30 14 * * 1-5"
 
   # Also allows triggering manually from the GitHub Actions tab
   workflow_dispatch:
@@ -23,6 +23,10 @@ on:
         description: "Number of top suggestions per strategy"
         required: false
         default: "10"
+      tfsa:
+        description: "Include TFSA allocation section (true / false)"
+        required: false
+        default: "true"
 
 jobs:
   scan-and-email:
@@ -62,4 +66,5 @@ jobs:
             --exchange "${{ github.event.inputs.exchange || 'all' }}" \
             --strategy "${{ github.event.inputs.strategy || 'all' }}" \
             --top      "${{ github.event.inputs.top     || '10'  }}" \
+            --tfsa \
             --email    "${{ secrets.EMAIL_TO }}"
