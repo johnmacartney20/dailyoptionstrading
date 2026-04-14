@@ -40,6 +40,7 @@ from scanner.data_fetcher import (
     get_stock_price,
 )
 from scanner.emailer import build_html_email, send_email
+from scanner.portfolio_allocator import PortfolioAllocation, allocate_portfolio
 from scanner.suggester import generate_suggestions, screen_options
 
 # ── Logging ────────────────────────────────────────────────────────────────────
@@ -84,6 +85,56 @@ def scan_ticker(ticker: str) -> List[pd.DataFrame]:
                 results.append(screened)
 
     return results
+
+
+def _print_portfolio_allocation(portfolio: PortfolioAllocation) -> None:
+    """Pretty-print the portfolio allocation summary to stdout."""
+    sep = "=" * 88
+    dash = "-" * 88
+
+    print(f"\n{sep}")
+    print("  PORTFOLIO ALLOCATION  —  $1,000 Total Capital Deployment")
+    print(sep)
+    print(f"  Total capital deployed : ${portfolio.total_deployed:,.2f}")
+    print(f"  Open trades suggested  : {portfolio.num_open_trades}")
+    print()
+
+    if portfolio.selected:
+        headers = [
+            "Ticker", "Sector", "Strategy", "Short", "Long", "Expiry",
+            "Score", "Max Profit", "Max Loss", "Allocation", "% Port",
+        ]
+        col_w = [7, 14, 16, 7, 7, 12, 7, 11, 9, 12, 7]
+
+        header_row = "  " + "  ".join(h.ljust(col_w[i]) for i, h in enumerate(headers))
+        print(header_row)
+        print("  " + dash[:len(header_row) - 2])
+
+        for t in portfolio.selected:
+            row = [
+                t.ticker,
+                t.sector,
+                t.strategy_type,
+                f"${t.short_strike:.2f}",
+                f"${t.long_strike:.2f}",
+                t.expiration,
+                f"{t.score:.1f}",
+                f"${t.max_profit:.2f}",
+                f"${t.max_loss:.2f}",
+                f"${t.allocation:,.2f}",
+                f"{t.pct_of_portfolio:.1f}%",
+            ]
+            print("  " + "  ".join(str(v).ljust(col_w[i]) for i, v in enumerate(row)))
+
+    else:
+        print("  No qualifying put spreads found for portfolio allocation.")
+
+    if portfolio.rejected:
+        print(f"\n  Rejected top candidates:")
+        for r in portfolio.rejected:
+            print(f"    • {r.ticker:<10}  score {r.score:5.1f}  —  {r.reason}")
+
+    print(f"{sep}\n")
 
 
 def _print_suggestions(suggestions: pd.DataFrame, top: int) -> None:
@@ -267,6 +318,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         suggestions = suggestions[suggestions["option_type"] == args.strategy]
 
     # ── Display ────────────────────────────────────────────────────────────────
+    portfolio = allocate_portfolio(suggestions)
+    _print_portfolio_allocation(portfolio)
     _print_suggestions(suggestions, top=args.top)
 
     # ── Optional CSV export ────────────────────────────────────────────────────
@@ -277,7 +330,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # ── Optional email delivery ────────────────────────────────────────────────
     if args.email:
         recipients = [addr.strip() for addr in args.email.split(",") if addr.strip()]
-        html = build_html_email(suggestions, exchange=args.exchange, top=args.top)
+        html = build_html_email(suggestions, exchange=args.exchange, top=args.top, portfolio=portfolio)
         try:
             send_email(
                 html,

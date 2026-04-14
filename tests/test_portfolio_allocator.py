@@ -1,0 +1,217 @@
+"""Unit tests for scanner.portfolio_allocator."""
+
+from datetime import date, timedelta
+
+import pandas as pd
+import pytest
+
+from scanner.portfolio_allocator import (
+    PortfolioAllocation,
+    TradeAllocation,
+    RejectedCandidate,
+    _are_correlated,
+    _parse_long_strike,
+    _score_weighted_allocation,
+    allocate_portfolio,
+)
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _expiry(days: int = 30) -> str:
+    return (date.today() + timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+def _make_put_row(
+    ticker: str,
+    strike: float = 95.0,
+    bid: float = 1.5,
+    score: float = 50.0,
+    open_interest: int = 1000,
+    spread_structure: str = "Sell 95P / Buy 90P",
+    max_spread_loss: float = 350.0,
+    expiry: str | None = None,
+) -> dict:
+    return {
+        "ticker": ticker,
+        "option_type": "put",
+        "strike": strike,
+        "bid": bid,
+        "score": score,
+        "openInterest": open_interest,
+        "spread_structure": spread_structure,
+        "max_spread_loss": max_spread_loss,
+        "expiry": expiry or _expiry(),
+    }
+
+
+def _make_suggestions(*rows) -> pd.DataFrame:
+    return pd.DataFrame(list(rows))
+
+
+# ── _are_correlated ────────────────────────────────────────────────────────────
+
+def test_correlated_same_group():
+    assert _are_correlated("AAPL", "MSFT") is True
+
+
+def test_correlated_chip_stocks():
+    assert _are_correlated("AMD", "NVDA") is True
+
+
+def test_not_correlated_different_groups():
+    assert _are_correlated("AAPL", "AMGN") is False
+
+
+def test_not_correlated_unknown_ticker():
+    assert _are_correlated("AAPL", "UNKNOWN") is False
+
+
+# ── _parse_long_strike ─────────────────────────────────────────────────────────
+
+def test_parse_long_strike_put():
+    assert _parse_long_strike("Sell 95P / Buy 90P") == 90.0
+
+
+def test_parse_long_strike_call():
+    assert _parse_long_strike("Sell 105C / Buy 110C") == 110.0
+
+
+def test_parse_long_strike_decimal():
+    assert _parse_long_strike("Sell 97.5P / Buy 95.0P") == 95.0
+
+
+def test_parse_long_strike_no_match():
+    assert _parse_long_strike("invalid") is None
+
+
+# ── _score_weighted_allocation ─────────────────────────────────────────────────
+
+def test_allocation_proportional_to_score():
+    allocs = _score_weighted_allocation([60.0, 40.0], total_capital=1000.0, max_position_pct=1.0)
+    assert len(allocs) == 2
+    assert abs(allocs[0] - 600.0) < 0.01
+    assert abs(allocs[1] - 400.0) < 0.01
+
+
+def test_allocation_cap_applied():
+    # Both scores equal → 50/50, but cap is 40 % → both get 400, 200 unallocated
+    # The redistribution is not triggered (both are at cap) so deployed = 800.
+    allocs = _score_weighted_allocation([50.0, 50.0], total_capital=1000.0, max_position_pct=0.40)
+    assert all(a <= 400.0 + 0.01 for a in allocs)
+
+
+def test_allocation_three_trades_total_equals_capital():
+    allocs = _score_weighted_allocation([70.0, 50.0, 30.0], total_capital=1000.0, max_position_pct=0.50)
+    assert abs(sum(allocs) - 1000.0) < 0.05
+
+
+def test_allocation_zero_scores_equal_weight():
+    allocs = _score_weighted_allocation([0.0, 0.0], total_capital=1000.0, max_position_pct=1.0)
+    assert abs(allocs[0] - 500.0) < 0.01
+    assert abs(allocs[1] - 500.0) < 0.01
+
+
+def test_allocation_single_trade():
+    allocs = _score_weighted_allocation([80.0], total_capital=1000.0, max_position_pct=0.50)
+    assert abs(allocs[0] - 500.0) < 0.01  # capped at 50%
+
+
+# ── allocate_portfolio ─────────────────────────────────────────────────────────
+
+def test_allocate_empty_suggestions():
+    result = allocate_portfolio(pd.DataFrame())
+    assert result.num_open_trades == 0
+    assert result.total_deployed == 0.0
+
+
+def test_allocate_no_puts():
+    df = _make_suggestions(_make_put_row("AAPL"))
+    df["option_type"] = "call"
+    result = allocate_portfolio(df)
+    assert result.num_open_trades == 0
+
+
+def test_allocate_single_put():
+    df = _make_suggestions(_make_put_row("AAPL", score=60.0))
+    result = allocate_portfolio(df, total_capital=1000.0)
+    assert result.num_open_trades == 1
+    trade = result.selected[0]
+    assert trade.ticker == "AAPL"
+    assert trade.sector == "Technology"
+    assert trade.strategy_type == "Bull Put Spread"
+    # Single trade with 50% cap → allocation = 500
+    assert trade.allocation == 500.0
+    assert trade.pct_of_portfolio == 50.0
+
+
+def test_allocate_respects_sector_cap():
+    """Two tech tickers should result in only one being selected."""
+    df = _make_suggestions(
+        _make_put_row("AAPL", score=70.0),
+        _make_put_row("MSFT", score=60.0, strike=290.0, spread_structure="Sell 290P / Buy 285P"),
+    )
+    result = allocate_portfolio(df, total_capital=1000.0)
+    tickers = [t.ticker for t in result.selected]
+    sectors = [t.sector for t in result.selected]
+    # Both are Technology; only one should be accepted
+    assert len(set(sectors)) == len(sectors), "Duplicate sectors found"
+
+
+def test_allocate_rejects_correlated():
+    """AAPL and MSFT are in the same correlation group; second should be rejected."""
+    df = _make_suggestions(
+        _make_put_row("AAPL", score=70.0),
+        _make_put_row("MSFT", score=60.0, strike=290.0, spread_structure="Sell 290P / Buy 285P"),
+    )
+    result = allocate_portfolio(df, total_capital=1000.0)
+    rejected_tickers = [r.ticker for r in result.rejected]
+    # MSFT should be rejected (either correlation or duplicate sector)
+    assert "MSFT" in rejected_tickers
+
+
+def test_allocate_max_three_trades():
+    rows = [
+        _make_put_row("AAPL", score=80.0),
+        _make_put_row("AMGN", score=70.0, strike=200.0, spread_structure="Sell 200P / Buy 190P"),
+        _make_put_row("COST", score=60.0, strike=700.0, spread_structure="Sell 700P / Buy 690P"),
+        _make_put_row("CSCO", score=50.0, strike=45.0, spread_structure="Sell 45P / Buy 42P"),
+    ]
+    df = _make_suggestions(*rows)
+    result = allocate_portfolio(df, total_capital=1000.0, max_trades=3)
+    assert result.num_open_trades <= 3
+
+
+def test_allocate_total_deployed():
+    rows = [
+        _make_put_row("AAPL", score=80.0),
+        _make_put_row("AMGN", score=70.0, strike=200.0, spread_structure="Sell 200P / Buy 190P"),
+    ]
+    df = _make_suggestions(*rows)
+    result = allocate_portfolio(df, total_capital=1000.0)
+    assert abs(result.total_deployed - 1000.0) < 0.05
+
+
+def test_allocate_trade_fields_populated():
+    df = _make_suggestions(
+        _make_put_row("AAPL", strike=95.0, bid=1.5, score=60.0, max_spread_loss=350.0)
+    )
+    result = allocate_portfolio(df, total_capital=1000.0)
+    assert result.num_open_trades == 1
+    trade = result.selected[0]
+    assert trade.short_strike == 95.0
+    assert trade.long_strike == 90.0          # parsed from "Sell 95P / Buy 90P"
+    assert trade.max_profit == 150.0          # 1.5 * 100
+    assert trade.max_loss == 350.0
+
+
+def test_allocate_portfolio_dataclass_properties():
+    pa = PortfolioAllocation(total_capital=1000.0)
+    assert pa.total_deployed == 0.0
+    assert pa.num_open_trades == 0
+    pa.selected.append(
+        TradeAllocation("AAPL", "Technology", "Bull Put Spread", 95.0, 90.0,
+                        "2025-05-16", 60.0, 150.0, 350.0, 500.0, 50.0)
+    )
+    assert pa.num_open_trades == 1
+    assert pa.total_deployed == 500.0

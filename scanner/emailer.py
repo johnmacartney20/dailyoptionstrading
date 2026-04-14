@@ -22,6 +22,8 @@ from typing import List, Optional
 
 import pandas as pd
 
+from .portfolio_allocator import PortfolioAllocation
+
 logger = logging.getLogger(__name__)
 
 # ── HTML template helpers ─────────────────────────────────────────────────────
@@ -40,6 +42,11 @@ _HTML_HEAD = """<!DOCTYPE html>
   tr:nth-child(even) td {{ background: #f2f2f2; }}
   .meta {{ color: #555; font-size: 12px; }}
   .disc {{ font-size: 11px; color: #888; margin-top: 20px; border-top: 1px solid #ccc; padding-top: 8px; }}
+  .port-box {{ background: #eaf4fb; border: 1px solid #1a5276; border-radius: 4px; padding: 12px 16px; margin-bottom: 20px; }}
+  .port-summary {{ font-size: 12px; color: #333; margin-bottom: 8px; }}
+  .port-summary strong {{ color: #1a5276; }}
+  .port-rejected {{ font-size: 11px; color: #666; margin-top: 10px; }}
+  .port-rejected li {{ margin: 2px 0; }}
 </style>
 </head>
 <body>
@@ -108,14 +115,68 @@ def _df_to_html_table(df: pd.DataFrame, top: int) -> str:
     return f"<table><thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table>"
 
 
+def _portfolio_to_html(portfolio: PortfolioAllocation) -> str:
+    """Return an HTML snippet summarising the portfolio allocation."""
+    html = '<div class="port-box">'
+    html += "<h2>💼 Portfolio Allocation — $1,000 Capital Deployment</h2>"
+    html += (
+        f'<p class="port-summary">'
+        f"Total capital deployed: <strong>${portfolio.total_deployed:,.2f}</strong>"
+        f" &nbsp;|&nbsp; Open trades suggested: <strong>{portfolio.num_open_trades}</strong>"
+        f"</p>"
+    )
+
+    if portfolio.selected:
+        cols = [
+            "Ticker", "Sector", "Strategy", "Short Strike", "Long Strike",
+            "Expiry", "Score", "Max Profit", "Max Loss", "Allocation", "% Portfolio",
+        ]
+        headers = "".join(f"<th>{h}</th>" for h in cols)
+        rows_html = ""
+        for t in portfolio.selected:
+            cells = "".join(
+                f"<td>{v}</td>"
+                for v in [
+                    t.ticker,
+                    t.sector,
+                    t.strategy_type,
+                    f"${t.short_strike:.2f}",
+                    f"${t.long_strike:.2f}",
+                    t.expiration,
+                    f"{t.score:.1f}",
+                    f"${t.max_profit:.2f}",
+                    f"${t.max_loss:.2f}",
+                    f"${t.allocation:,.2f}",
+                    f"{t.pct_of_portfolio:.1f}%",
+                ]
+            )
+            rows_html += f"<tr>{cells}</tr>"
+        html += f"<table><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table>"
+    else:
+        html += "<p>No qualifying put spreads found for portfolio allocation.</p>"
+
+    if portfolio.rejected:
+        html += '<div class="port-rejected"><strong>Rejected top candidates:</strong><ul>'
+        for r in portfolio.rejected:
+            html += f"<li><strong>{r.ticker}</strong> (score {r.score:.1f}) — {r.reason}</li>"
+        html += "</ul></div>"
+
+    html += "</div>"
+    return html
+
+
 def build_html_email(
     suggestions: pd.DataFrame,
     exchange: str,
     top: int = 10,
+    portfolio: Optional[PortfolioAllocation] = None,
 ) -> str:
     """Return a complete HTML email string for the given *suggestions* DataFrame."""
     today = date.today().strftime("%Y-%m-%d")
     html = _HTML_HEAD.format(date=today, exchange=exchange.upper(), total=len(suggestions))
+
+    if portfolio is not None:
+        html += _portfolio_to_html(portfolio)
 
     for opt_type, label in _STRATEGY_LABELS.items():
         sub = suggestions[suggestions["option_type"] == opt_type]
