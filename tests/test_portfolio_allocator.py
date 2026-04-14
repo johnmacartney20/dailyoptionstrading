@@ -9,10 +9,14 @@ from scanner.portfolio_allocator import (
     PortfolioAllocation,
     TradeAllocation,
     RejectedCandidate,
+    TfsaTradeAllocation,
+    TfsaAllocation,
     _are_correlated,
     _parse_long_strike,
+    _parse_sell_strike_tfsa,
     _score_weighted_allocation,
     allocate_portfolio,
+    allocate_tfsa_portfolio,
 )
 
 
@@ -215,3 +219,147 @@ def test_allocate_portfolio_dataclass_properties():
     )
     assert pa.num_open_trades == 1
     assert pa.total_deployed == 500.0
+
+
+# ── _parse_sell_strike_tfsa ───────────────────────────────────────────────────
+
+def test_parse_sell_strike_tfsa_call():
+    assert _parse_sell_strike_tfsa("Buy 105C / Sell 110C") == 110.0
+
+
+def test_parse_sell_strike_tfsa_decimal():
+    assert _parse_sell_strike_tfsa("Buy 97.5C / Sell 102.5C") == 102.5
+
+
+def test_parse_sell_strike_tfsa_no_match():
+    assert _parse_sell_strike_tfsa("invalid") is None
+
+
+# ── allocate_tfsa_portfolio ────────────────────────────────────────────────────
+
+def _make_call_row(
+    ticker: str,
+    strike: float = 105.0,
+    bid: float = 1.0,
+    ask: float = 1.1,
+    score: float = 50.0,
+    tfsa_score: float = 55.0,
+    open_interest: int = 1000,
+    tfsa_spread: str = "Buy 105C / Sell 110C",
+    max_spread_loss: float = 390.0,
+    expiry: str | None = None,
+) -> dict:
+    return {
+        "ticker": ticker,
+        "option_type": "call",
+        "strike": strike,
+        "bid": bid,
+        "ask": ask,
+        "score": score,
+        "tfsa_score": tfsa_score,
+        "openInterest": open_interest,
+        "tfsa_spread": tfsa_spread,
+        "max_spread_loss": max_spread_loss,
+        "expiry": expiry or _expiry(),
+    }
+
+
+def test_tfsa_allocate_empty_suggestions():
+    result = allocate_tfsa_portfolio(pd.DataFrame())
+    assert result.num_open_trades == 0
+    assert result.total_deployed == 0.0
+
+
+def test_tfsa_allocate_no_calls():
+    """Only put rows → no TFSA trades selected."""
+    df = _make_suggestions(_make_put_row("AAPL"))
+    result = allocate_tfsa_portfolio(df)
+    assert result.num_open_trades == 0
+
+
+def test_tfsa_allocate_single_call():
+    df = _make_suggestions(_make_call_row("AAPL", strike=105.0, ask=1.0))
+    result = allocate_tfsa_portfolio(df, total_capital=1000.0)
+    assert result.num_open_trades == 1
+    trade = result.selected[0]
+    assert trade.ticker == "AAPL"
+    assert trade.sector == "Technology"
+    assert trade.strategy_type == "Call Debit Spread"
+    assert trade.buy_strike == 105.0
+    assert trade.sell_strike == 110.0  # 105 + 5 width
+    # max_loss = ask * 100 = 100
+    assert trade.max_loss == pytest.approx(100.0)
+    # max_profit = (width - ask) * 100 = (5 - 1) * 100 = 400
+    assert trade.max_profit == pytest.approx(400.0)
+
+
+def test_tfsa_allocate_max_two_trades():
+    """TFSA allocator should select at most 2 trades by default."""
+    rows = [
+        _make_call_row("AAPL", tfsa_score=80.0),
+        _make_call_row("AMGN", strike=200.0, tfsa_score=70.0,
+                       tfsa_spread="Buy 200C / Sell 210C"),
+        _make_call_row("COST", strike=700.0, tfsa_score=60.0,
+                       tfsa_spread="Buy 700C / Sell 710C"),
+    ]
+    df = _make_suggestions(*rows)
+    result = allocate_tfsa_portfolio(df, total_capital=1000.0)
+    assert result.num_open_trades <= 2
+
+
+def test_tfsa_allocate_rejects_correlated():
+    """AAPL and MSFT are correlated; second should be rejected."""
+    df = _make_suggestions(
+        _make_call_row("AAPL", tfsa_score=70.0),
+        _make_call_row("MSFT", strike=300.0, tfsa_score=65.0,
+                       tfsa_spread="Buy 300C / Sell 310C"),
+    )
+    result = allocate_tfsa_portfolio(df, total_capital=1000.0)
+    rejected_tickers = [r.ticker for r in result.rejected]
+    assert "MSFT" in rejected_tickers
+
+
+def test_tfsa_allocate_rejects_duplicate_sector():
+    """Two Technology tickers → only one selected."""
+    df = _make_suggestions(
+        _make_call_row("AAPL", tfsa_score=70.0),
+        _make_call_row("NVDA", strike=800.0, tfsa_score=65.0,
+                       tfsa_spread="Buy 800C / Sell 810C"),
+    )
+    result = allocate_tfsa_portfolio(df, total_capital=1000.0)
+    sectors = [t.sector for t in result.selected]
+    assert len(set(sectors)) == len(sectors)
+
+
+def test_tfsa_allocate_sorted_by_tfsa_score():
+    """Higher tfsa_score trade should be selected over lower one."""
+    df = _make_suggestions(
+        _make_call_row("AAPL", tfsa_score=40.0),
+        _make_call_row("AMGN", strike=200.0, tfsa_score=75.0,
+                       tfsa_spread="Buy 200C / Sell 210C"),
+    )
+    result = allocate_tfsa_portfolio(df, total_capital=1000.0, max_trades=1)
+    assert result.num_open_trades == 1
+    assert result.selected[0].ticker == "AMGN"
+
+
+def test_tfsa_allocate_fallback_spread_without_tfsa_spread():
+    """When tfsa_spread is missing, spread structure is inferred from strike."""
+    row = _make_call_row("AAPL", strike=105.0, ask=1.0, tfsa_score=60.0)
+    del row["tfsa_spread"]
+    df = pd.DataFrame([row])
+    result = allocate_tfsa_portfolio(df, total_capital=1000.0)
+    assert result.num_open_trades == 1
+    assert result.selected[0].sell_strike == 110.0
+
+
+def test_tfsa_allocation_dataclass_properties():
+    ta = TfsaAllocation(total_capital=1000.0)
+    assert ta.total_deployed == 0.0
+    assert ta.num_open_trades == 0
+    ta.selected.append(
+        TfsaTradeAllocation("AAPL", "Technology", "Call Debit Spread",
+                            105.0, 110.0, "2025-05-16", 60.0, 400.0, 100.0, 600.0, 60.0)
+    )
+    assert ta.num_open_trades == 1
+    assert ta.total_deployed == 600.0

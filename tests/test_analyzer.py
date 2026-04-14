@@ -12,6 +12,8 @@ from scanner.analyzer import (
     calculate_risk_adjusted_return,
     enrich_options,
     score_option,
+    score_option_tfsa,
+    suggest_call_debit_spread,
     suggest_spread_structure,
     _spread_width,
 )
@@ -356,4 +358,150 @@ def test_score_iv_env_bonus_requires_35pct():
     s_above = score_option(**_base_kwargs(implied_volatility=0.35, otm_pct=0.07))
     # The 5-pt env bonus should make IV=0.35 score higher than IV=0.30
     assert s_above > s_below
+
+
+# ── suggest_call_debit_spread ─────────────────────────────────────────────────
+
+
+def test_suggest_call_debit_spread_medium_strike():
+    # strike=105 → width=5 → sell=110
+    assert suggest_call_debit_spread(105.0) == "Buy 105C / Sell 110C"
+
+
+def test_suggest_call_debit_spread_small_strike():
+    # strike=30 → width=2.5 → sell=32.5 → rounded to 32
+    assert suggest_call_debit_spread(30.0) == "Buy 30C / Sell 32C"
+
+
+def test_suggest_call_debit_spread_large_strike():
+    # strike=250 → width=10 → sell=260
+    assert suggest_call_debit_spread(250.0) == "Buy 250C / Sell 260C"
+
+
+def test_suggest_call_debit_spread_direction():
+    """The buy strike must be lower than the sell strike."""
+    result = suggest_call_debit_spread(100.0)
+    assert result.startswith("Buy ")
+    assert "/ Sell " in result
+
+
+# ── score_option_tfsa ─────────────────────────────────────────────────────────
+
+
+def test_score_tfsa_zero_ask_returns_zero():
+    assert score_option_tfsa(
+        ask=0.0, strike=105.0, stock_price=100.0,
+        open_interest=1000, implied_volatility=0.3, otm_pct=0.05,
+    ) == 0.0
+
+
+def test_score_tfsa_ask_exceeds_spread_width_returns_zero():
+    # ask=6 > width=5 for strike=100 → no positive upside
+    assert score_option_tfsa(
+        ask=6.0, strike=100.0, stock_price=100.0,
+        open_interest=1000, implied_volatility=0.3, otm_pct=0.05,
+    ) == 0.0
+
+
+def test_score_tfsa_higher_upside_ratio_wins():
+    """Cheaper ask relative to spread width → higher TFSA score."""
+    s_cheap = score_option_tfsa(
+        ask=0.5, strike=105.0, stock_price=100.0,
+        open_interest=1000, implied_volatility=0.3, otm_pct=0.05,
+    )
+    s_expensive = score_option_tfsa(
+        ask=4.0, strike=105.0, stock_price=100.0,
+        open_interest=1000, implied_volatility=0.3, otm_pct=0.05,
+    )
+    assert s_cheap > s_expensive
+
+
+def test_score_tfsa_sweet_spot_otm():
+    """Calls in the 3–10 % OTM range should score higher than deep OTM (20 %)."""
+    s_sweet = score_option_tfsa(
+        ask=1.0, strike=106.0, stock_price=100.0,
+        open_interest=1000, implied_volatility=0.35, otm_pct=0.06,
+    )
+    s_deep = score_option_tfsa(
+        ask=1.0, strike=120.0, stock_price=100.0,
+        open_interest=1000, implied_volatility=0.35, otm_pct=0.20,
+    )
+    assert s_sweet > s_deep
+
+
+def test_score_tfsa_higher_oi_wins():
+    """More open interest → higher TFSA score (liquidity component)."""
+    s_low_oi = score_option_tfsa(
+        ask=1.0, strike=105.0, stock_price=100.0,
+        open_interest=100, implied_volatility=0.3, otm_pct=0.05,
+    )
+    s_high_oi = score_option_tfsa(
+        ask=1.0, strike=105.0, stock_price=100.0,
+        open_interest=8000, implied_volatility=0.3, otm_pct=0.05,
+    )
+    assert s_high_oi > s_low_oi
+
+
+def test_score_tfsa_moderate_iv_beats_very_low_iv():
+    """Moderate IV (0.35) should score higher than very low IV (0.15) for TFSA."""
+    s_low_iv = score_option_tfsa(
+        ask=1.0, strike=105.0, stock_price=100.0,
+        open_interest=1000, implied_volatility=0.15, otm_pct=0.05,
+    )
+    s_mod_iv = score_option_tfsa(
+        ask=1.0, strike=105.0, stock_price=100.0,
+        open_interest=1000, implied_volatility=0.35, otm_pct=0.05,
+    )
+    assert s_mod_iv > s_low_iv
+
+
+def test_score_tfsa_itm_call_scores_zero():
+    """ITM calls (otm_pct < 0) should receive no OTM sweet-spot score."""
+    s_itm = score_option_tfsa(
+        ask=1.0, strike=95.0, stock_price=100.0,
+        open_interest=1000, implied_volatility=0.3, otm_pct=-0.05,
+    )
+    s_otm = score_option_tfsa(
+        ask=1.0, strike=106.0, stock_price=100.0,
+        open_interest=1000, implied_volatility=0.3, otm_pct=0.06,
+    )
+    assert s_otm > s_itm
+
+
+def test_enrich_options_call_adds_tfsa_columns():
+    """enrich_options should add tfsa_score and tfsa_spread for calls."""
+    import pandas as pd
+
+    expiry = (date.today() + timedelta(days=30)).strftime("%Y-%m-%d")
+    df = pd.DataFrame([{
+        "strike": 105.0, "bid": 1.0, "ask": 1.1,
+        "openInterest": 1000, "volume": 50,
+        "impliedVolatility": 0.35, "inTheMoney": False,
+        "contractSymbol": "AAPL105C",
+    }])
+    enriched = enrich_options(df, stock_price=100.0, option_type="call", expiry=expiry, ticker="AAPL")
+
+    assert "tfsa_score" in enriched.columns
+    assert "tfsa_spread" in enriched.columns
+    assert enriched["tfsa_score"].iloc[0] > 0
+    assert enriched["tfsa_spread"].iloc[0] == "Buy 105C / Sell 110C"
+
+
+def test_enrich_options_put_tfsa_columns_zero():
+    """enrich_options should set tfsa_score=0 and tfsa_spread='' for puts."""
+    import pandas as pd
+
+    expiry = (date.today() + timedelta(days=30)).strftime("%Y-%m-%d")
+    df = pd.DataFrame([{
+        "strike": 95.0, "bid": 1.5, "ask": 1.6,
+        "openInterest": 1000, "volume": 50,
+        "impliedVolatility": 0.3, "inTheMoney": False,
+        "contractSymbol": "AAPL95P",
+    }])
+    enriched = enrich_options(df, stock_price=100.0, option_type="put", expiry=expiry, ticker="AAPL")
+
+    assert "tfsa_score" in enriched.columns
+    assert "tfsa_spread" in enriched.columns
+    assert enriched["tfsa_score"].iloc[0] == 0.0
+    assert enriched["tfsa_spread"].iloc[0] == ""
 
