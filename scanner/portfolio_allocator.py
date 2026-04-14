@@ -79,6 +79,10 @@ TICKER_SECTORS: Dict[str, str] = {
     "MRNA": "Healthcare",
 }
 
+# Maximum allowed DTE spread (in calendar days) between any two selected trades.
+# Trades outside this window are rejected to avoid staggered risk exposure.
+_MAX_DTE_SPREAD: int = 7
+
 # Groups of tickers considered highly correlated with each other.
 # Only one trade per group is allowed in the portfolio.
 _CORRELATION_GROUPS: List[frozenset] = [
@@ -294,6 +298,7 @@ def allocate_portfolio(
     selected_rows: List[pd.Series] = []
     selected_tickers: List[str] = []
     selected_sectors: List[str] = []
+    reference_dte: Optional[int] = None
 
     # Inspect a generous pool to surface useful rejection messages.
     candidate_pool = puts.head(max(max_trades * 5, 15))
@@ -330,9 +335,23 @@ def allocate_portfolio(
             )
             continue
 
+        candidate_dte = row.get("dte")
+        if reference_dte is not None and candidate_dte is not None:
+            if abs(int(candidate_dte) - reference_dte) > _MAX_DTE_SPREAD:
+                result.rejected.append(
+                    RejectedCandidate(
+                        ticker,
+                        float(row["score"]),
+                        f"DTE mismatch ({int(candidate_dte)}d vs reference {reference_dte}d)",
+                    )
+                )
+                continue
+
         selected_rows.append(row)
         selected_tickers.append(ticker)
         selected_sectors.append(sector)
+        if reference_dte is None and candidate_dte is not None:
+            reference_dte = int(candidate_dte)
 
     if not selected_rows:
         return result
@@ -421,6 +440,7 @@ def allocate_tfsa_portfolio(
     selected_rows: List[pd.Series] = []
     selected_tickers: List[str] = []
     selected_sectors: List[str] = []
+    reference_dte: Optional[int] = None
 
     candidate_pool = calls.head(max(max_trades * 5, 10))
 
@@ -455,9 +475,23 @@ def allocate_tfsa_portfolio(
             )
             continue
 
+        candidate_dte = row.get("dte")
+        if reference_dte is not None and candidate_dte is not None:
+            if abs(int(candidate_dte) - reference_dte) > _MAX_DTE_SPREAD:
+                result.rejected.append(
+                    RejectedCandidate(
+                        ticker,
+                        row_score,
+                        f"DTE mismatch ({int(candidate_dte)}d vs reference {reference_dte}d)",
+                    )
+                )
+                continue
+
         selected_rows.append(row)
         selected_tickers.append(ticker)
         selected_sectors.append(sector)
+        if reference_dte is None and candidate_dte is not None:
+            reference_dte = int(candidate_dte)
 
     if not selected_rows:
         return result
