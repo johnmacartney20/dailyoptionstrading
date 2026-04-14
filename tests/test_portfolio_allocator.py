@@ -12,6 +12,7 @@ from scanner.portfolio_allocator import (
     TfsaTradeAllocation,
     TfsaAllocation,
     _are_correlated,
+    _MAX_DTE_SPREAD,
     _parse_long_strike,
     _parse_sell_strike_tfsa,
     _score_weighted_allocation,
@@ -35,8 +36,9 @@ def _make_put_row(
     spread_structure: str = "Sell 95P / Buy 90P",
     max_spread_loss: float = 350.0,
     expiry: str | None = None,
+    dte: int | None = None,
 ) -> dict:
-    return {
+    row = {
         "ticker": ticker,
         "option_type": "put",
         "strike": strike,
@@ -47,6 +49,9 @@ def _make_put_row(
         "max_spread_loss": max_spread_loss,
         "expiry": expiry or _expiry(),
     }
+    if dte is not None:
+        row["dte"] = dte
+    return row
 
 
 def _make_suggestions(*rows) -> pd.DataFrame:
@@ -248,8 +253,9 @@ def _make_call_row(
     tfsa_spread: str = "Buy 105C / Sell 110C",
     max_spread_loss: float = 390.0,
     expiry: str | None = None,
+    dte: int | None = None,
 ) -> dict:
-    return {
+    row = {
         "ticker": ticker,
         "option_type": "call",
         "strike": strike,
@@ -262,6 +268,9 @@ def _make_call_row(
         "max_spread_loss": max_spread_loss,
         "expiry": expiry or _expiry(),
     }
+    if dte is not None:
+        row["dte"] = dte
+    return row
 
 
 def test_tfsa_allocate_empty_suggestions():
@@ -363,3 +372,103 @@ def test_tfsa_allocation_dataclass_properties():
     )
     assert ta.num_open_trades == 1
     assert ta.total_deployed == 600.0
+
+
+# ── DTE similarity filter ──────────────────────────────────────────────────────
+
+def test_allocate_rejects_dte_mismatch():
+    """A put with DTE more than _MAX_DTE_SPREAD days from the first should be rejected."""
+    ref_dte = 30
+    far_dte = ref_dte + _MAX_DTE_SPREAD + 1
+    df = _make_suggestions(
+        _make_put_row("AAPL", score=80.0, dte=ref_dte),
+        _make_put_row(
+            "AMGN",
+            score=70.0,
+            strike=200.0,
+            spread_structure="Sell 200P / Buy 190P",
+            dte=far_dte,
+        ),
+    )
+    result = allocate_portfolio(df, total_capital=1000.0)
+    tickers = [t.ticker for t in result.selected]
+    assert "AAPL" in tickers
+    assert "AMGN" not in tickers
+    rejected_reasons = {r.ticker: r.reason for r in result.rejected}
+    assert "AMGN" in rejected_reasons
+    assert "DTE mismatch" in rejected_reasons["AMGN"]
+
+
+def test_allocate_accepts_dte_within_tolerance():
+    """Two puts with DTE within _MAX_DTE_SPREAD days should both be accepted."""
+    ref_dte = 30
+    close_dte = ref_dte + _MAX_DTE_SPREAD  # exactly at the boundary
+    df = _make_suggestions(
+        _make_put_row("AAPL", score=80.0, dte=ref_dte),
+        _make_put_row(
+            "AMGN",
+            score=70.0,
+            strike=200.0,
+            spread_structure="Sell 200P / Buy 190P",
+            dte=close_dte,
+        ),
+    )
+    result = allocate_portfolio(df, total_capital=1000.0)
+    tickers = [t.ticker for t in result.selected]
+    assert "AAPL" in tickers
+    assert "AMGN" in tickers
+
+
+def test_allocate_dte_missing_skips_filter():
+    """When DTE is absent from candidate rows the filter is skipped gracefully."""
+    df = _make_suggestions(
+        _make_put_row("AAPL", score=80.0),
+        _make_put_row("AMGN", score=70.0, strike=200.0,
+                      spread_structure="Sell 200P / Buy 190P"),
+    )
+    result = allocate_portfolio(df, total_capital=1000.0)
+    # Both should pass the DTE filter (it is a no-op when dte is absent)
+    assert result.num_open_trades == 2
+
+
+def test_tfsa_allocate_rejects_dte_mismatch():
+    """A call with DTE more than _MAX_DTE_SPREAD days from the first should be rejected."""
+    ref_dte = 30
+    far_dte = ref_dte + _MAX_DTE_SPREAD + 1
+    df = _make_suggestions(
+        _make_call_row("AAPL", tfsa_score=80.0, dte=ref_dte),
+        _make_call_row(
+            "AMGN",
+            strike=200.0,
+            tfsa_score=70.0,
+            tfsa_spread="Buy 200C / Sell 210C",
+            dte=far_dte,
+        ),
+    )
+    result = allocate_tfsa_portfolio(df, total_capital=1000.0)
+    tickers = [t.ticker for t in result.selected]
+    assert "AAPL" in tickers
+    assert "AMGN" not in tickers
+    rejected_reasons = {r.ticker: r.reason for r in result.rejected}
+    assert "AMGN" in rejected_reasons
+    assert "DTE mismatch" in rejected_reasons["AMGN"]
+
+
+def test_tfsa_allocate_accepts_dte_within_tolerance():
+    """Two calls with DTE within _MAX_DTE_SPREAD days should both be accepted."""
+    ref_dte = 30
+    close_dte = ref_dte + _MAX_DTE_SPREAD
+    df = _make_suggestions(
+        _make_call_row("AAPL", tfsa_score=80.0, dte=ref_dte),
+        _make_call_row(
+            "AMGN",
+            strike=200.0,
+            tfsa_score=70.0,
+            tfsa_spread="Buy 200C / Sell 210C",
+            dte=close_dte,
+        ),
+    )
+    result = allocate_tfsa_portfolio(df, total_capital=1000.0)
+    tickers = [t.ticker for t in result.selected]
+    assert "AAPL" in tickers
+    assert "AMGN" in tickers
