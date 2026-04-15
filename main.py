@@ -624,8 +624,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             monthly_tfsa_stock = fut_m_tfsa_stock.result()
             monthly_rrsp = fut_m_rrsp.result()
 
-        from datetime import date as _date
-
         monthly_html = build_monthly_portfolio_email(
             tfsa_stock=monthly_tfsa_stock,
             tfsa_opts=monthly_tfsa_opts,
@@ -634,7 +632,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             rrsp_capital=_MONTHLY_RRSP_CAPITAL,
         )
         monthly_subject = (
-            f"Monthly Portfolio Review — {_date.today().strftime('%B %Y')}"
+            f"Monthly Portfolio Review — {date.today().strftime('%B %Y')}"
         )
         try:
             send_email(

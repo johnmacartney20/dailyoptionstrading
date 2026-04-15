@@ -436,7 +436,7 @@ def build_monthly_portfolio_email(
 ) -> str:
     """Return a complete HTML email for the monthly $20,000 TFSA + RRSP portfolio review.
 
-    The email shows an adequately balanced portfolio:
+    The email shows a well-balanced portfolio:
 
     * **TFSA** (*tfsa_capital*, default $10,000): growth stocks + long calls.
     * **RRSP** (*rrsp_capital*, default $10,000): stability stocks & ETFs.
@@ -454,9 +454,7 @@ def build_monthly_portfolio_email(
     rrsp_capital:
         Total RRSP capital (default $10,000).
     """
-    from datetime import date as _date
-
-    today = _date.today()
+    today = date.today()
     month_year = today.strftime("%B %Y")
     total_capital = tfsa_capital + rrsp_capital
 
