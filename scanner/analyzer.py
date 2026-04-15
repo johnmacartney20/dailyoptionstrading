@@ -114,10 +114,11 @@ def suggest_spread_structure(strike: float, option_type: str) -> str:
 
 
 def suggest_call_debit_spread(strike: float) -> str:
-    """Return a human-readable call debit spread string (long the lower strike).
+    """Return a reference spread string showing the long call and a higher strike.
 
-    This is the TFSA-appropriate structure: buy the call at *strike*, sell a
-    higher-strike call to cap cost and define maximum risk.
+    Used internally to populate the ``tfsa_spread`` column for informational
+    purposes only.  The TFSA strategy is a **single-leg long call** – the sell
+    leg shown here is *not* executed.
 
     Example
     -------
@@ -140,13 +141,12 @@ def score_option_tfsa(
 
     Unlike :func:`score_option`, which rewards premium *sellers*, this score
     rewards trades with **asymmetric upside and defined risk** – suitable for a
-    TFSA where short premium is not permitted.  Components:
+    TFSA where only long (single-leg) calls are permitted.  Components:
 
-    1. **Upside ratio** (0–35 pts): ``(spread_width − ask) / ask`` for a call
-       debit spread.  A higher ratio means more potential profit per dollar
-       risked.
-    2. **OTM sweet-spot** (0–30 pts): rewards strikes 3–10 % OTM, where call
-       debit spreads offer the best leverage-vs-probability balance.
+    1. **Upside ratio** (0–35 pts): potential upside relative to premium paid.
+       A higher ratio means more potential profit per dollar risked.
+    2. **OTM sweet-spot** (0–30 pts): rewards strikes 3–10 % OTM, where long
+       calls offer the best leverage-vs-probability balance.
     3. **Liquidity** (0–20 pts): log-scaled open-interest bonus (same as the
        standard scorer) rewarding depth and participation.
     4. **IV momentum** (0–15 pts): moderate-to-high IV signals potential for a

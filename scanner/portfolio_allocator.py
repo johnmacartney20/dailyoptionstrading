@@ -87,6 +87,11 @@ TICKER_SECTORS: Dict[str, str] = {
 # Keeps all positions near the same expiry cycle (approximately 7–10 days window).
 _MAX_DTE_SPREAD: int = 10
 
+# Target DTE window for TFSA long calls (approximately 30 days out).
+# Expiries outside this window are excluded before candidate selection.
+_TFSA_LONG_CALL_MIN_DTE: int = 21
+_TFSA_LONG_CALL_MAX_DTE: int = 42
+
 # Groups of tickers considered highly correlated with each other.
 # Only one trade per group is allowed in the portfolio.
 _CORRELATION_GROUPS: List[frozenset] = [
@@ -204,7 +209,7 @@ def _parse_long_strike(spread_structure: str) -> Optional[float]:
 
 
 def _parse_sell_strike_tfsa(spread_structure: str) -> Optional[float]:
-    """Extract the sell-leg strike from a TFSA call debit spread string.
+    """Extract the sell-leg strike from a spread structure string.
 
     E.g. ``"Buy 105C / Sell 110C"`` → ``110.0``
     """
@@ -442,6 +447,22 @@ def allocate_tfsa_portfolio(
 
     sort_col = "tfsa_score" if "tfsa_score" in calls.columns else "score"
     calls = calls.sort_values(sort_col, ascending=False).reset_index(drop=True)
+
+    # ── DTE pre-filter: prefer options close to 30 days to expiry ─────────────
+    if "dte" in calls.columns:
+        dte_filtered = calls[
+            (calls["dte"] >= _TFSA_LONG_CALL_MIN_DTE)
+            & (calls["dte"] <= _TFSA_LONG_CALL_MAX_DTE)
+        ]
+        # Fall back to the full call list only if the filter yields nothing.
+        if not dte_filtered.empty:
+            calls = dte_filtered.reset_index(drop=True)
+        else:
+            logger.debug(
+                "No TFSA long calls with DTE in [%d, %d]; using full range.",
+                _TFSA_LONG_CALL_MIN_DTE,
+                _TFSA_LONG_CALL_MAX_DTE,
+            )
 
     selected_rows: List[pd.Series] = []
     selected_tickers: List[str] = []

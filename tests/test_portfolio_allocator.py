@@ -13,6 +13,8 @@ from scanner.portfolio_allocator import (
     TfsaAllocation,
     _are_correlated,
     _MAX_DTE_SPREAD,
+    _TFSA_LONG_CALL_MIN_DTE,
+    _TFSA_LONG_CALL_MAX_DTE,
     _parse_long_strike,
     _parse_sell_strike_tfsa,
     _score_weighted_allocation,
@@ -472,3 +474,43 @@ def test_tfsa_allocate_accepts_dte_within_tolerance():
     tickers = [t.ticker for t in result.selected]
     assert "AAPL" in tickers
     assert "AMGN" in tickers
+
+
+# ── TFSA ~30-day DTE window pre-filter ───────────────────────────────────────
+
+def test_tfsa_dte_window_prefers_30day_over_out_of_range():
+    """Call inside the 21–42 DTE window should be preferred even with a lower score."""
+    in_range_dte = (_TFSA_LONG_CALL_MIN_DTE + _TFSA_LONG_CALL_MAX_DTE) // 2  # ~31
+    out_of_range_dte = _TFSA_LONG_CALL_MAX_DTE + 5  # clearly outside range
+    df = _make_suggestions(
+        # lower score but within target DTE range
+        _make_call_row("AAPL", tfsa_score=50.0, dte=in_range_dte),
+        # higher score but outside target DTE range
+        _make_call_row("AMGN", strike=200.0, tfsa_score=80.0, dte=out_of_range_dte),
+    )
+    result = allocate_tfsa_portfolio(df, total_capital=1000.0, max_trades=1)
+    assert result.num_open_trades == 1
+    assert result.selected[0].ticker == "AAPL"
+
+
+def test_tfsa_dte_window_fallback_when_no_in_range_calls():
+    """When no calls are within 21–42 DTE, the allocator should fall back to full range."""
+    out_of_range_dte = _TFSA_LONG_CALL_MAX_DTE + 10  # outside 21–42
+    df = _make_suggestions(
+        _make_call_row("AAPL", tfsa_score=70.0, dte=out_of_range_dte),
+    )
+    result = allocate_tfsa_portfolio(df, total_capital=1000.0)
+    # Must still produce a result rather than silently returning nothing
+    assert result.num_open_trades == 1
+    assert result.selected[0].ticker == "AAPL"
+
+
+def test_tfsa_dte_window_no_dte_column_skips_filter():
+    """When rows have no DTE column, the pre-filter should be skipped entirely."""
+    df = _make_suggestions(
+        _make_call_row("AAPL", tfsa_score=70.0),   # no dte kwarg → no column
+        _make_call_row("AMGN", strike=200.0, tfsa_score=60.0),
+    )
+    result = allocate_tfsa_portfolio(df, total_capital=1000.0)
+    # Both should pass since no DTE filter is applied
+    assert result.num_open_trades == 2
