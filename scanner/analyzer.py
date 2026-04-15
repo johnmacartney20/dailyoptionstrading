@@ -4,10 +4,15 @@ Pure-function helpers for computing metrics used to rank and filter options:
 days-to-expiration, out-of-the-money percentage, annualized return on capital,
 risk-adjusted return, suggested spread structure, and a composite score that
 prioritises high-probability, executable trades over raw annualised return.
+
+Also contains composite stock scoring functions used for TFSA (growth) and
+RRSP (stability) portfolio allocation models.
 """
 
 import math
+from dataclasses import dataclass
 from datetime import date, datetime
+from typing import List, Optional
 
 import pandas as pd
 
@@ -385,4 +390,318 @@ def enrich_options(
         out["tfsa_spread"] = ""
 
     return out
+
+
+# ── Stock scoring for TFSA / RRSP allocation ──────────────────────────────────
+
+# Minimum trading days of price history required for reliable scoring.
+_MIN_HISTORY_DAYS: int = 20
+
+
+@dataclass
+class StockScoreComponents:
+    """Composite stock score with individual component breakdown.
+
+    Used by both the TFSA growth model and the RRSP stability model.
+    All components are non-negative; the composite is their sum.
+    """
+
+    trend_strength: float       # 0–30 (TFSA) / 0–30 (RRSP: consistency)
+    relative_strength: float    # 0–20 (TFSA only; 0.0 for RRSP)
+    volatility_control: float   # 0–15 (TFSA) / 0–30 (RRSP: low-vol reward)
+    liquidity: float            # 0–15 (TFSA) / 0–20 (RRSP)
+    drawdown_risk: float        # 0–20 (both)
+    composite: float            # sum of all components (0–100)
+    reasoning: str              # human-readable explanation of key drivers
+
+
+def score_stock_growth(
+    price_history: pd.DataFrame,
+    market_return_20d: float = 0.0,
+) -> StockScoreComponents:
+    """Score a stock for TFSA growth allocation (higher = better, max ≈ 100).
+
+    Five weighted components:
+
+    1. **Trend Strength** (0–30 pts): price above 20/50-day MAs, plus
+       short-term (5-day) and medium-term (20-day) momentum bonuses.
+    2. **Relative Strength** (0–20 pts): 20-day return in excess of the
+       broader market (e.g. SPY).  Underperforming stocks score 0.
+    3. **Volatility Control** (0–15 pts): annualised vol < 15 % earns full
+       points; penalises excessively volatile stocks progressively.
+    4. **Liquidity** (0–15 pts): log-scaled 20-day average daily volume.
+       ~100 K shares/day earns ~5 pts; 10 M+ earns the full 15 pts.
+    5. **Drawdown Risk** (0–20 pts): penalises stocks that are heavily
+       extended above their 20-day MA or sitting at a 20-day high
+       (reversal risk zone).
+
+    Parameters
+    ----------
+    price_history:
+        OHLCV DataFrame from ``get_price_history`` (yfinance format).
+        Must contain ``Close`` and ``Volume`` columns.
+    market_return_20d:
+        Trailing 20-day return of the benchmark (e.g. SPY).  Pass ``0.0``
+        for a neutral baseline when the benchmark is unavailable.
+
+    Returns
+    -------
+    :class:`StockScoreComponents`
+        All scores are 0 when ``price_history`` has fewer than
+        :data:`_MIN_HISTORY_DAYS` rows.
+    """
+    _zero = StockScoreComponents(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, "Insufficient price history")
+    if price_history is None or len(price_history) < _MIN_HISTORY_DAYS:
+        return _zero
+
+    close = price_history["Close"].astype(float)
+    volume = price_history["Volume"].astype(float)
+    current_price = float(close.iloc[-1])
+    if current_price <= 0:
+        return _zero
+
+    # ── 1. Trend Strength (0–30 pts) ─────────────────────────────────────────
+    ma20 = float(close.tail(20).mean())
+    above_20ma = current_price > ma20
+    trend_pts = 10.0 if above_20ma else 0.0
+
+    above_50ma = False
+    if len(close) >= 50:
+        ma50 = float(close.tail(50).mean())
+        above_50ma = current_price > ma50
+        trend_pts += 10.0 if above_50ma else 0.0
+
+    # 5-day momentum (0–5 pts)
+    if len(close) >= 6:
+        mom_5d = current_price / float(close.iloc[-6]) - 1.0
+        if mom_5d > 0:
+            trend_pts += min(mom_5d / 0.05 * 5.0, 5.0)
+
+    # 20-day momentum (0–5 pts)
+    if len(close) >= 21:
+        mom_20d = current_price / float(close.iloc[-21]) - 1.0
+        if mom_20d > 0:
+            trend_pts += min(mom_20d / 0.10 * 5.0, 5.0)
+
+    trend_pts = min(trend_pts, 30.0)
+
+    # ── 2. Relative Strength (0–20 pts) ──────────────────────────────────────
+    rs_pts = 0.0
+    stock_return_20d = 0.0
+    if len(close) >= 21:
+        stock_return_20d = current_price / float(close.iloc[-21]) - 1.0
+        excess = stock_return_20d - market_return_20d
+        if excess > 0:
+            rs_pts = min(excess / 0.10 * 20.0, 20.0)   # 10 % excess → 20 pts
+        # underperformance floors at 0 (no negative)
+
+    # ── 3. Volatility Control (0–15 pts) ─────────────────────────────────────
+    daily_returns = close.pct_change().dropna()
+    ann_vol = 0.0
+    vol_pts = 7.5  # neutral default when insufficient history
+    if len(daily_returns) >= 10:
+        ann_vol = float(daily_returns.tail(20).std()) * math.sqrt(252.0)
+        if ann_vol <= 0.15:
+            vol_pts = 15.0
+        elif ann_vol <= 0.30:
+            vol_pts = 15.0 - (ann_vol - 0.15) / 0.15 * 5.0
+        elif ann_vol <= 0.50:
+            vol_pts = 10.0 - (ann_vol - 0.30) / 0.20 * 10.0
+        else:
+            vol_pts = 0.0
+        vol_pts = max(vol_pts, 0.0)
+
+    # ── 4. Liquidity (0–15 pts) ───────────────────────────────────────────────
+    avg_vol_20d = float(volume.tail(20).mean())
+    liq_pts = min(max(math.log10(max(avg_vol_20d, 1.0)) - 4.0, 0.0) * 5.0, 15.0)
+
+    # ── 5. Drawdown Risk (0–20 pts) ───────────────────────────────────────────
+    high_20d = float(close.tail(20).max())
+    extension = (current_price - ma20) / ma20 if ma20 > 0 else 0.0
+    pct_from_high = (high_20d - current_price) / high_20d if high_20d > 0 else 0.0
+
+    # Penalise overextension above 20-day MA
+    if extension > 0.20:
+        ext_penalty = 15.0
+    elif extension > 0.10:
+        ext_penalty = 8.0
+    elif extension > 0.05:
+        ext_penalty = 3.0
+    else:
+        ext_penalty = 0.0
+
+    # Penalise stocks at their 20-day high (reversal risk) or deep drawdown
+    if pct_from_high < 0.02:
+        high_penalty = 5.0   # very close to top – reversal zone
+    elif pct_from_high > 0.25:
+        high_penalty = 5.0   # large pullback – avoid catching a falling knife
+    else:
+        high_penalty = 0.0
+
+    drawdown_pts = max(20.0 - ext_penalty - high_penalty, 0.0)
+
+    # ── Composite ─────────────────────────────────────────────────────────────
+    composite = trend_pts + rs_pts + vol_pts + liq_pts + drawdown_pts
+
+    # ── Reasoning ─────────────────────────────────────────────────────────────
+    reasons: List[str] = []
+    if above_20ma:
+        reasons.append("above 20MA")
+    else:
+        reasons.append("below 20MA")
+    if above_50ma:
+        reasons.append("above 50MA")
+    elif len(close) >= 50:
+        reasons.append("below 50MA")
+    if rs_pts >= 10.0:
+        reasons.append("outperforming market")
+    elif stock_return_20d < market_return_20d and len(close) >= 21:
+        reasons.append("lagging market")
+    if ann_vol > 0 and ann_vol <= 0.25:
+        reasons.append(f"low vol ({ann_vol:.0%})")
+    elif ann_vol > 0.45:
+        reasons.append(f"high vol ({ann_vol:.0%}) penalised")
+    if extension > 0.10:
+        reasons.append(f"extended {extension:.0%} above MA")
+    if liq_pts >= 10.0:
+        reasons.append("strong liquidity")
+    reasoning = "; ".join(reasons) if reasons else "moderate trend and momentum"
+
+    return StockScoreComponents(
+        trend_strength=round(trend_pts, 2),
+        relative_strength=round(rs_pts, 2),
+        volatility_control=round(vol_pts, 2),
+        liquidity=round(liq_pts, 2),
+        drawdown_risk=round(drawdown_pts, 2),
+        composite=round(composite, 2),
+        reasoning=reasoning,
+    )
+
+
+def score_stock_stability(
+    price_history: pd.DataFrame,
+) -> StockScoreComponents:
+    """Score a stock for RRSP stability allocation (higher = better, max ≈ 100).
+
+    Four components optimised for long-term, low-turnover holdings:
+
+    1. **Consistency** (0–30 pts): above 20/50-day MAs and positive
+       20-day return signal a stable upward trend.
+    2. **Low Volatility** (0–30 pts): directly rewards low annualised vol;
+       large-cap defensives with < 12 % vol earn full points.
+    3. **Liquidity** (0–20 pts): log-scaled 20-day average daily volume,
+       favouring the highly liquid large-caps appropriate for buy-and-hold.
+    4. **Trend Protection** (0–20 pts): rewards stocks near recent highs
+       and penalises those in a confirmed downtrend below their 20-day MA.
+
+    Parameters
+    ----------
+    price_history:
+        OHLCV DataFrame from ``get_price_history`` (yfinance format).
+
+    Returns
+    -------
+    :class:`StockScoreComponents`
+        ``relative_strength`` is always ``0.0`` for the stability model.
+    """
+    _zero = StockScoreComponents(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, "Insufficient price history")
+    if price_history is None or len(price_history) < _MIN_HISTORY_DAYS:
+        return _zero
+
+    close = price_history["Close"].astype(float)
+    volume = price_history["Volume"].astype(float)
+    current_price = float(close.iloc[-1])
+    if current_price <= 0:
+        return _zero
+
+    # ── 1. Consistency / Trend (0–30 pts) ────────────────────────────────────
+    ma20 = float(close.tail(20).mean())
+    above_20ma = current_price > ma20
+    consistency_pts = 10.0 if above_20ma else 0.0
+
+    above_50ma = False
+    if len(close) >= 50:
+        ma50 = float(close.tail(50).mean())
+        above_50ma = current_price > ma50
+        consistency_pts += 10.0 if above_50ma else 0.0
+
+    # Positive 20-day return (0–10 pts)
+    if len(close) >= 21:
+        ret_20d = current_price / float(close.iloc[-21]) - 1.0
+        consistency_pts += min(max(ret_20d / 0.05 * 5.0, 0.0), 10.0)
+
+    consistency_pts = min(consistency_pts, 30.0)
+
+    # ── 2. Low Volatility (0–30 pts) ─────────────────────────────────────────
+    daily_returns = close.pct_change().dropna()
+    ann_vol = 0.0
+    low_vol_pts = 15.0  # neutral default
+    if len(daily_returns) >= 10:
+        ann_vol = float(daily_returns.tail(20).std()) * math.sqrt(252.0)
+        if ann_vol <= 0.12:
+            low_vol_pts = 30.0
+        elif ann_vol <= 0.20:
+            low_vol_pts = 30.0 - (ann_vol - 0.12) / 0.08 * 10.0
+        elif ann_vol <= 0.30:
+            low_vol_pts = 20.0 - (ann_vol - 0.20) / 0.10 * 10.0
+        elif ann_vol <= 0.50:
+            low_vol_pts = 10.0 - (ann_vol - 0.30) / 0.20 * 10.0
+        else:
+            low_vol_pts = 0.0
+        low_vol_pts = max(low_vol_pts, 0.0)
+
+    # ── 3. Liquidity (0–20 pts) ───────────────────────────────────────────────
+    avg_vol_20d = float(volume.tail(20).mean())
+    liq_pts = min(max(math.log10(max(avg_vol_20d, 1.0)) - 4.0, 0.0) * 6.67, 20.0)
+
+    # ── 4. Trend Protection (0–20 pts) ────────────────────────────────────────
+    high_20d = float(close.tail(20).max())
+    pct_from_high = (high_20d - current_price) / high_20d if high_20d > 0 else 0.0
+
+    if pct_from_high <= 0.05:
+        trend_prot_pts = 20.0
+    elif pct_from_high <= 0.15:
+        trend_prot_pts = 20.0 - (pct_from_high - 0.05) / 0.10 * 10.0
+    else:
+        trend_prot_pts = 10.0 - (pct_from_high - 0.15) / 0.15 * 10.0
+
+    if not above_20ma:
+        trend_prot_pts = max(trend_prot_pts - 5.0, 0.0)   # downtrend penalty
+
+    trend_prot_pts = max(min(trend_prot_pts, 20.0), 0.0)
+
+    # ── Composite ─────────────────────────────────────────────────────────────
+    composite = consistency_pts + low_vol_pts + liq_pts + trend_prot_pts
+
+    # ── Long-term thesis ──────────────────────────────────────────────────────
+    reasons: List[str] = []
+    if above_50ma:
+        reasons.append("above 50-day MA (strong trend)")
+    elif above_20ma:
+        reasons.append("above 20-day MA")
+    else:
+        reasons.append("below 20-day MA (caution)")
+    if ann_vol > 0 and ann_vol <= 0.20:
+        reasons.append(f"low volatility ({ann_vol:.0%})")
+    elif ann_vol > 0 and ann_vol <= 0.35:
+        reasons.append(f"moderate volatility ({ann_vol:.0%})")
+    elif ann_vol > 0:
+        reasons.append(f"elevated volatility ({ann_vol:.0%})")
+    if liq_pts >= 13.0:
+        reasons.append("highly liquid large-cap")
+    elif liq_pts >= 6.0:
+        reasons.append("adequate liquidity")
+    if pct_from_high <= 0.10:
+        reasons.append("near recent highs (strength)")
+    long_term_thesis = "; ".join(reasons) if reasons else "stable large-cap holding"
+
+    return StockScoreComponents(
+        trend_strength=round(consistency_pts, 2),
+        relative_strength=0.0,        # not used for RRSP
+        volatility_control=round(low_vol_pts, 2),
+        liquidity=round(liq_pts, 2),
+        drawdown_risk=round(trend_prot_pts, 2),
+        composite=round(composite, 2),
+        reasoning=long_term_thesis,
+    )
 

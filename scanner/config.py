@@ -72,6 +72,26 @@ NASDAQ_TICKERS = [
     "MRNA",   # Moderna
 ]
 
+# ── RRSP tickers ───────────────────────────────────────────────────────────────
+# Curated list of large-cap stocks and broad-market ETFs suitable for a
+# long-term, stability-focused RRSP portfolio.
+RRSP_TICKERS = [
+    # Canadian Blue-chip
+    "RY.TO",    # Royal Bank of Canada – largest Canadian bank
+    "TD.TO",    # Toronto-Dominion Bank
+    "ENB.TO",   # Enbridge – pipeline/infrastructure income
+    "CNR.TO",   # Canadian National Railway
+    "BCE.TO",   # BCE Inc. – telecom dividend
+    # US Large-cap (RRSP-eligible)
+    "AAPL",     # Apple – mega-cap technology
+    "MSFT",     # Microsoft – mega-cap technology / cloud
+    "COST",     # Costco – defensive consumer staples
+    "AMGN",     # Amgen – large-cap healthcare
+    # Broad-market ETFs
+    "SPY",      # SPDR S&P 500 ETF – US broad market
+    "QQQ",      # Invesco NASDAQ-100 ETF – US growth
+]
+
 # ── Screening parameters ───────────────────────────────────────────────────────
 SCREENING_PARAMS = {
     # Days to expiration window (inclusive)

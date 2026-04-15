@@ -22,7 +22,7 @@ from typing import List, Optional
 
 import pandas as pd
 
-from .portfolio_allocator import PortfolioAllocation, TfsaAllocation
+from .portfolio_allocator import PortfolioAllocation, RrspPortfolio, TfsaAllocation, TfsaStockPortfolio
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,11 @@ _HTML_HEAD = """<!DOCTYPE html>
   .tfsa-meta {{ font-size: 11px; color: #555; margin-bottom: 6px; }}
   .tfsa-rejected {{ font-size: 11px; color: #666; margin-top: 10px; }}
   .tfsa-rejected li {{ margin: 2px 0; }}
+  .tfsa-stock-box {{ background: #fef9e7; border: 1px solid #b7950b; border-radius: 4px; padding: 12px 16px; margin-bottom: 20px; }}
+  .tfsa-stock-box h2 {{ color: #7d6608; border-bottom-color: #b7950b; }}
+  .tfsa-stock-exit {{ font-size: 11px; color: #555; margin-top: 10px; font-style: italic; }}
+  .rrsp-box {{ background: #f4ecf7; border: 1px solid #7d3c98; border-radius: 4px; padding: 12px 16px; margin-bottom: 20px; }}
+  .rrsp-box h2 {{ color: #6c3483; border-bottom-color: #7d3c98; }}
 </style>
 </head>
 <body>
@@ -228,12 +233,121 @@ def _tfsa_allocation_to_html(tfsa: TfsaAllocation) -> str:
     return html
 
 
+def _tfsa_stock_to_html(tfsa_stock: TfsaStockPortfolio) -> str:
+    """Return an HTML snippet for the TFSA stock (growth) allocation."""
+    html = '<div class="tfsa-stock-box">'
+    html += "<h2>📈 TFSA Allocation — Stock Portfolio (Growth Focus)</h2>"
+    html += (
+        '<p class="tfsa-meta">'
+        "Strategy: <strong>Direct stock ownership</strong> &nbsp;|&nbsp; "
+        "Scoring: Trend(30%) + RS(20%) + Vol(15%) + Liquidity(15%) + Drawdown(20%)"
+        "</p>"
+    )
+    html += (
+        f'<p class="tfsa-summary">'
+        f"Total deployed: <strong>${tfsa_stock.total_deployed:,.2f}</strong>"
+        f" &nbsp;|&nbsp; High-conviction positions: <strong>{tfsa_stock.num_positions}</strong>"
+        f"</p>"
+    )
+
+    if tfsa_stock.selected:
+        cols = [
+            "Ticker", "Sector", "Price", "Score",
+            "Allocation", "% Portfolio", "Reasoning",
+        ]
+        headers = "".join(f"<th>{h}</th>" for h in cols)
+        rows_html = ""
+        for t in tfsa_stock.selected:
+            cells = "".join(
+                f"<td>{v}</td>"
+                for v in [
+                    t.ticker,
+                    t.sector,
+                    f"${t.current_price:.2f}",
+                    f"{t.composite_score:.1f}",
+                    f"${t.allocation:,.2f}",
+                    f"{t.pct_of_portfolio:.1f}%",
+                    t.reasoning,
+                ]
+            )
+            rows_html += f"<tr>{cells}</tr>"
+        html += f"<table><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table>"
+        html += (
+            f'<p class="tfsa-stock-exit">{tfsa_stock.exit_guidance}</p>'
+        )
+    else:
+        html += "<p>No qualifying stocks found for TFSA stock allocation.</p>"
+
+    if tfsa_stock.rejected:
+        html += '<div class="tfsa-rejected"><strong>Rejected candidates:</strong><ul>'
+        for r in tfsa_stock.rejected:
+            html += f"<li><strong>{r.ticker}</strong> (score {r.score:.1f}) — {r.reason}</li>"
+        html += "</ul></div>"
+
+    html += "</div>"
+    return html
+
+
+def _rrsp_to_html(rrsp: RrspPortfolio) -> str:
+    """Return an HTML snippet for the RRSP stability allocation."""
+    html = '<div class="rrsp-box">'
+    html += "<h2>🏦 RRSP Allocation — Stability Focus (Long-Term Holdings)</h2>"
+    html += (
+        '<p class="tfsa-meta">'
+        "Strategy: <strong>Large-cap stocks &amp; ETFs</strong> &nbsp;|&nbsp; "
+        "Emphasis: consistency over growth, low volatility"
+        "</p>"
+    )
+    html += (
+        f'<p class="tfsa-summary">'
+        f"Total deployed: <strong>${rrsp.total_deployed:,.2f}</strong>"
+        f" &nbsp;|&nbsp; Positions: <strong>{rrsp.num_positions}</strong>"
+        f"</p>"
+    )
+
+    if rrsp.selected:
+        cols = [
+            "Ticker", "Sector", "Price", "Score",
+            "Allocation", "% Portfolio", "Long-Term Thesis",
+        ]
+        headers = "".join(f"<th>{h}</th>" for h in cols)
+        rows_html = ""
+        for t in rrsp.selected:
+            cells = "".join(
+                f"<td>{v}</td>"
+                for v in [
+                    t.ticker,
+                    t.sector,
+                    f"${t.current_price:.2f}",
+                    f"{t.composite_score:.1f}",
+                    f"${t.allocation:,.2f}",
+                    f"{t.pct_of_portfolio:.1f}%",
+                    t.long_term_thesis,
+                ]
+            )
+            rows_html += f"<tr>{cells}</tr>"
+        html += f"<table><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table>"
+    else:
+        html += "<p>No qualifying positions found for RRSP allocation.</p>"
+
+    if rrsp.rejected:
+        html += '<div class="tfsa-rejected"><strong>Rejected candidates:</strong><ul>'
+        for r in rrsp.rejected:
+            html += f"<li><strong>{r.ticker}</strong> (score {r.score:.1f}) — {r.reason}</li>"
+        html += "</ul></div>"
+
+    html += "</div>"
+    return html
+
+
 def build_html_email(
     suggestions: pd.DataFrame,
     exchange: str,
     top: int = 10,
     portfolio: Optional[PortfolioAllocation] = None,
     tfsa_allocation: Optional[TfsaAllocation] = None,
+    tfsa_stock: Optional[TfsaStockPortfolio] = None,
+    rrsp: Optional[RrspPortfolio] = None,
 ) -> str:
     """Return a complete HTML email string for the given *suggestions* DataFrame."""
     today = date.today().strftime("%Y-%m-%d")
@@ -244,6 +358,12 @@ def build_html_email(
 
     if tfsa_allocation is not None:
         html += _tfsa_allocation_to_html(tfsa_allocation)
+
+    if tfsa_stock is not None:
+        html += _tfsa_stock_to_html(tfsa_stock)
+
+    if rrsp is not None:
+        html += _rrsp_to_html(rrsp)
 
     for opt_type, label in _STRATEGY_LABELS.items():
         sub = suggestions[suggestions["option_type"] == opt_type]
