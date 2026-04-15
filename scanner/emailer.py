@@ -350,109 +350,391 @@ _HTML_MONTHLY_HEAD = """<!DOCTYPE html>
 <style>
   body  {{ font-family: Arial, sans-serif; font-size: 13px; color: #222; }}
   h1    {{ color: #1a5276; font-size: 20px; margin-bottom: 4px; }}
-  h2    {{ color: #1a5276; font-size: 15px; margin-top: 24px; border-bottom: 2px solid #1a5276; padding-bottom: 4px; }}
+  h2    {{ color: #1a5276; font-size: 16px; margin-top: 28px; border-bottom: 2px solid #1a5276; padding-bottom: 4px; }}
+  h3    {{ color: #2e4057; font-size: 14px; margin-top: 16px; margin-bottom: 4px; }}
   table {{ border-collapse: collapse; width: 100%; margin-top: 8px; }}
   th    {{ background: #1a5276; color: #fff; padding: 6px 10px; text-align: left; font-size: 12px; }}
   td    {{ padding: 5px 10px; border-bottom: 1px solid #ddd; }}
   tr:nth-child(even) td {{ background: #f2f2f2; }}
   .meta {{ color: #555; font-size: 12px; }}
   .disc {{ font-size: 11px; color: #888; margin-top: 20px; border-top: 1px solid #ccc; padding-top: 8px; }}
-  .summary-box {{ background: #eaf4fb; border: 1px solid #1a5276; border-radius: 4px;
-                  padding: 12px 16px; margin-bottom: 20px; }}
-  .summary-box h2 {{ color: #1a5276; border-bottom-color: #1a5276; }}
-  .tfsa-box {{ background: #eafaf1; border: 1px solid #1e8449; border-radius: 4px; padding: 12px 16px; margin-bottom: 20px; }}
+  .section-box {{ background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px;
+                  padding: 14px 18px; margin-bottom: 24px; }}
+  .section-box h2 {{ color: #1a5276; border-bottom-color: #1a5276; }}
+  .perf-table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
+  .perf-table th {{ background: #2e4057; color: #fff; padding: 6px 10px; text-align: left; }}
+  .perf-table td {{ padding: 6px 10px; border-bottom: 1px solid #ddd; }}
+  .insight-block {{ margin: 8px 0 4px 0; padding: 8px 12px; border-left: 3px solid #1a5276;
+                    background: #eaf4fb; font-size: 12px; color: #333; }}
+  .tfsa-box {{ background: #eafaf1; border: 1px solid #1e8449; border-radius: 4px; padding: 14px 18px; margin-bottom: 24px; }}
   .tfsa-box h2 {{ color: #1e8449; border-bottom-color: #1e8449; }}
-  .tfsa-summary {{ font-size: 12px; color: #333; margin-bottom: 8px; }}
-  .tfsa-summary strong {{ color: #1e8449; }}
+  .tfsa-box h3 {{ color: #1e8449; }}
   .tfsa-meta {{ font-size: 11px; color: #555; margin-bottom: 6px; }}
-  .tfsa-rejected {{ font-size: 11px; color: #666; margin-top: 10px; }}
-  .tfsa-rejected li {{ margin: 2px 0; }}
-  .tfsa-stock-box {{ background: #fef9e7; border: 1px solid #b7950b; border-radius: 4px; padding: 12px 16px; margin-bottom: 20px; }}
-  .tfsa-stock-box h2 {{ color: #7d6608; border-bottom-color: #b7950b; }}
-  .tfsa-stock-exit {{ font-size: 11px; color: #555; margin-top: 10px; font-style: italic; }}
-  .rrsp-box {{ background: #f4ecf7; border: 1px solid #7d3c98; border-radius: 4px; padding: 12px 16px; margin-bottom: 20px; }}
+  .rrsp-box {{ background: #f4ecf7; border: 1px solid #7d3c98; border-radius: 4px; padding: 14px 18px; margin-bottom: 24px; }}
   .rrsp-box h2 {{ color: #6c3483; border-bottom-color: #7d3c98; }}
+  .rrsp-box h3 {{ color: #6c3483; }}
   .rrsp-meta {{ font-size: 11px; color: #555; margin-bottom: 6px; }}
-  .rrsp-summary {{ font-size: 12px; color: #333; margin-bottom: 8px; }}
-  .rrsp-summary strong {{ color: #6c3483; }}
-  .balance-table {{ width: 100%; border-collapse: collapse; margin: 12px 0; }}
-  .balance-table th {{ background: #1a5276; color: #fff; padding: 6px 10px; text-align: left; }}
-  .balance-table td {{ padding: 6px 10px; border-bottom: 1px solid #ddd; }}
+  .strategy-note {{ font-size: 12px; color: #555; font-style: italic; margin: 6px 0; }}
+  .alloc-reasoning {{ font-size: 11px; color: #444; }}
 </style>
 </head>
 <body>
 <h1>📊 Monthly Portfolio Review — {month_year}</h1>
-<p class="meta">Total portfolio value: <strong>${total_capital:,.0f}</strong>
-&nbsp;|&nbsp; TFSA: <strong>${tfsa_capital:,.0f}</strong>
-&nbsp;|&nbsp; RRSP: <strong>${rrsp_capital:,.0f}</strong></p>
+<p class="meta">
+  TFSA (Growth): <strong>${tfsa_capital:,.0f}</strong>
+  &nbsp;|&nbsp; RRSP (Stability): <strong>${rrsp_capital:,.0f}</strong>
+  &nbsp;|&nbsp; Total: <strong>${total_capital:,.0f}</strong>
+</p>
 """
 
 
-def _monthly_portfolio_summary_html(
+def _estimate_monthly_return_growth(score: float) -> float:
+    """Estimate a simulated monthly % return for a TFSA growth stock from its composite score.
+
+    Mapping (linear interpolation):
+    * score ≤ 30  → −2.0 %
+    * score = 60  →  3.0 %
+    * score = 80  →  6.5 %
+    * score = 100 → 10.0 %
+    """
+    if score <= 30:
+        return -2.0
+    if score <= 60:
+        return -2.0 + (score - 30) / 30.0 * 5.0
+    if score <= 80:
+        return 3.0 + (score - 60) / 20.0 * 3.5
+    return 6.5 + (score - 80) / 20.0 * 3.5
+
+
+def _estimate_monthly_return_stability(score: float) -> float:
+    """Estimate a simulated monthly % return for an RRSP stability holding from its composite score.
+
+    Mapping:
+    * score ≤ 30  → −1.0 %
+    * score = 60  →  1.5 %
+    * score = 80  →  3.0 %
+    * score = 100 →  5.0 %
+    """
+    if score <= 30:
+        return -1.0
+    if score <= 60:
+        return -1.0 + (score - 30) / 30.0 * 2.5
+    if score <= 80:
+        return 1.5 + (score - 60) / 20.0 * 1.5
+    return 3.0 + (score - 80) / 20.0 * 2.0
+
+
+def _monthly_perf_section_html(
+    tfsa_stock: "TfsaStockPortfolio",
+    rrsp: "RrspPortfolio",
     tfsa_capital: float,
     rrsp_capital: float,
-    tfsa_opts_deployed: float,
-    tfsa_stock_deployed: float,
-    rrsp_deployed: float,
 ) -> str:
-    """Return an HTML overview table showing the high-level capital split."""
-    total = tfsa_capital + rrsp_capital
-    html = '<div class="summary-box">'
-    html += "<h2>💼 Portfolio Balance Overview</h2>"
+    """Return HTML for Section 1 — Performance Summary."""
+    html = '<div class="section-box">'
+    html += "<h2>📈 Section 1 — Performance Summary</h2>"
     html += (
-        "<table class='balance-table'>"
-        "<thead><tr>"
-        "<th>Account</th><th>Strategy</th><th>Allocated</th><th>% of Total</th>"
-        "</tr></thead><tbody>"
+        '<p class="strategy-note">'
+        "Returns below are <em>simulated estimates</em> derived from each position's "
+        "composite momentum and stability score. They reflect expected behavior given "
+        "current trend, volatility, and liquidity conditions — not guaranteed results."
+        "</p>"
     )
-    rows = [
-        ("TFSA", "Long Calls (options)", tfsa_opts_deployed),
-        ("TFSA", "Growth Stocks", tfsa_stock_deployed),
-        ("RRSP", "Stability Stocks &amp; ETFs", rrsp_deployed),
-    ]
-    for account, strategy, deployed in rows:
-        pct = deployed / total * 100 if total > 0 else 0.0
-        html += (
-            f"<tr><td>{account}</td><td>{strategy}</td>"
-            f"<td>${deployed:,.2f}</td><td>{pct:.1f}%</td></tr>"
+
+    for label, portfolio_obj, capital, estimator, box_class in [
+        ("TFSA (Growth)", tfsa_stock, tfsa_capital, _estimate_monthly_return_growth, "tfsa"),
+        ("RRSP (Stability)", rrsp, rrsp_capital, _estimate_monthly_return_stability, "rrsp"),
+    ]:
+        positions = portfolio_obj.selected  # type: ignore[union-attr]
+        if not positions:
+            html += f"<p>No positions selected for {label}.</p>"
+            continue
+
+        # Weighted average return (weight = allocation fraction)
+        total_alloc = sum(p.allocation for p in positions)
+        if total_alloc > 0:
+            weighted_return = sum(
+                estimator(p.composite_score) * p.allocation / total_alloc
+                for p in positions
+            )
+        else:
+            weighted_return = 0.0
+
+        ending_value = capital * (1 + weighted_return / 100)
+        dollar_gain = ending_value - capital
+
+        # Sort by estimated return for strongest/weakest
+        scored = sorted(
+            [(p, estimator(p.composite_score)) for p in positions],
+            key=lambda x: x[1],
+            reverse=True,
         )
-    total_deployed = tfsa_opts_deployed + tfsa_stock_deployed + rrsp_deployed
+        strongest = scored[:2]
+        weakest = scored[-1:]
+
+        html += f"<h3>{label}</h3>"
+        html += (
+            "<table class='perf-table'>"
+            "<thead><tr>"
+            "<th>Metric</th><th>Value</th>"
+            "</tr></thead><tbody>"
+            f"<tr><td>Starting Value</td><td><strong>${capital:,.0f}</strong></td></tr>"
+            f"<tr><td>Estimated Ending Value</td><td><strong>${ending_value:,.0f}</strong></td></tr>"
+            f"<tr><td>Estimated Monthly Return</td><td><strong>{weighted_return:+.1f}%</strong> (${dollar_gain:+,.0f})</td></tr>"
+        )
+        strong_str = ", ".join(
+            f"{p.ticker} ({ret:+.1f}%, {p.sector})" for p, ret in strongest
+        )
+        weak_str = ", ".join(
+            f"{p.ticker} ({ret:+.1f}%, {p.sector})" for p, ret in weakest
+        )
+        html += (
+            f"<tr><td>Strongest Positions</td><td>{strong_str}</td></tr>"
+            f"<tr><td>Weakest Positions</td><td>{weak_str}</td></tr>"
+        )
+        html += "</tbody></table>"
+
+    html += "</div>"
+    return html
+
+
+def _monthly_insights_section_html(
+    tfsa_stock: "TfsaStockPortfolio",
+    rrsp: "RrspPortfolio",
+) -> str:
+    """Return HTML for Section 2 — Insights and Learnings."""
+    html = '<div class="section-box">'
+    html += "<h2>🔍 Section 2 — Insights and Learnings</h2>"
+
+    all_positions = list(tfsa_stock.selected) + list(rrsp.selected)  # type: ignore[operator]
+    if not all_positions:
+        html += "<p>No positions to analyse.</p></div>"
+        return html
+
+    # Sector performance: average composite score per sector
+    sector_scores: dict[str, list[float]] = {}
+    for p in all_positions:
+        sector_scores.setdefault(p.sector, []).append(p.composite_score)
+    sector_avg = {s: sum(scores) / len(scores) for s, scores in sector_scores.items()}
+    top_sectors = sorted(sector_avg.items(), key=lambda x: x[1], reverse=True)
+    winning_sectors = top_sectors[:3]
+    lagging_sectors = top_sectors[-2:] if len(top_sectors) > 2 else []
+
+    html += "<h3>Winning Patterns</h3>"
+    html += '<div class="insight-block"><ul>'
+    for sector, avg in winning_sectors:
+        html += f"<li><strong>{sector}</strong> — avg composite score {avg:.0f}: strong momentum and trend consistency.</li>"
+    html += "</ul></div>"
+
+    if lagging_sectors:
+        html += "<h3>Lagging Patterns</h3>"
+        html += '<div class="insight-block"><ul>'
+        for sector, avg in lagging_sectors:
+            html += (
+                f"<li><strong>{sector}</strong> — avg composite score {avg:.0f}: "
+                "weaker trend or elevated drawdown risk; underweight or monitor closely.</li>"
+            )
+        html += "</ul></div>"
+
+    # Volatility and correlation commentary
+    high_score = [p for p in all_positions if p.composite_score >= 70]
+    low_score = [p for p in all_positions if p.composite_score < 50]
+
+    html += "<h3>Macro and Volatility Commentary</h3>"
+    html += '<div class="insight-block"><ul>'
+    if high_score:
+        high_str = ", ".join(p.ticker for p in high_score)
+        html += (
+            f"<li>High-conviction positions ({high_str}) show strong trend alignment "
+            "and controlled volatility — suitable to hold through minor pullbacks.</li>"
+        )
+    if low_score:
+        low_str = ", ".join(p.ticker for p in low_score)
+        html += (
+            f"<li>Lower-scoring positions ({low_str}) carry elevated volatility or "
+            "weaker momentum — consider tighter position sizing or exit on breakdown.</li>"
+        )
+    if not high_score and not low_score:
+        html += "<li>All positions fall in the moderate range — maintain current sizing and review again next month.</li>"
     html += (
-        f"<tr><td><strong>Total</strong></td><td></td>"
-        f"<td><strong>${total_deployed:,.2f}</strong></td>"
-        f"<td><strong>{total_deployed / total * 100:.1f}%</strong></td></tr>"
-        if total > 0 else ""
+        "<li>Sector concentration is capped at &lt;50% per account to limit "
+        "correlated drawdown risk across both TFSA and RRSP.</li>"
     )
-    html += "</tbody></table></div>"
+    html += "</ul></div>"
+
+    html += "</div>"
+    return html
+
+
+def _monthly_rebalance_section_html(
+    tfsa_stock: "TfsaStockPortfolio",
+    rrsp: "RrspPortfolio",
+) -> str:
+    """Return HTML for Section 3 — Portfolio Rebalance Strategy."""
+    html = '<div class="section-box">'
+    html += "<h2>🔄 Section 3 — Portfolio Rebalance Strategy</h2>"
+
+    # TFSA rebalance
+    html += '<div class="tfsa-box">'
+    html += "<h3>📈 TFSA (Growth Focus)</h3>"
+    html += (
+        '<p class="tfsa-meta">'
+        "Priority: <strong>High-upside, trend-driven positions</strong> &nbsp;|&nbsp; "
+        "Scoring: Trend(30%) + Relative Strength(20%) + Vol(15%) + Liquidity(15%) + Drawdown(20%)"
+        "</p>"
+    )
+    if tfsa_stock.selected:
+        html += "<ul>"
+        for p in tfsa_stock.selected:
+            html += (
+                f"<li><strong>{p.ticker}</strong> ({p.sector}) — "
+                f"Score: {p.composite_score:.0f} | "
+                f"<span class='alloc-reasoning'>{p.reasoning}</span></li>"
+            )
+        html += "</ul>"
+        html += (
+            f'<p class="strategy-note">'
+            f"Maintain {len(tfsa_stock.selected)} concentrated positions. "
+            "Take partial profits at +15–25%; allow winners to run if trend holds. "
+            "Exit if price breaks the 20-day moving average.</p>"
+        )
+    else:
+        html += "<p>No qualifying growth positions identified this month.</p>"
+    html += "</div>"
+
+    # RRSP rebalance
+    html += '<div class="rrsp-box">'
+    html += "<h3>🏦 RRSP (Stability Focus)</h3>"
+    html += (
+        '<p class="rrsp-meta">'
+        "Priority: <strong>Diversification and low volatility</strong> &nbsp;|&nbsp; "
+        "Scoring: Consistency(30%) + Low Volatility(30%) + Liquidity(20%) + Trend Protection(20%)"
+        "</p>"
+    )
+    if rrsp.selected:
+        html += "<ul>"
+        for p in rrsp.selected:
+            html += (
+                f"<li><strong>{p.ticker}</strong> ({p.sector}) — "
+                f"Score: {p.composite_score:.0f} | "
+                f"<span class='alloc-reasoning'>{p.long_term_thesis}</span></li>"
+            )
+        html += "</ul>"
+        html += (
+            f'<p class="strategy-note">'
+            f"Hold {len(rrsp.selected)} diversified positions across sectors. "
+            "Rebalance only if a position drops below its 50-day MA or a better-scoring "
+            "alternative emerges. Prioritise income and capital preservation.</p>"
+        )
+    else:
+        html += "<p>No qualifying stability positions identified this month.</p>"
+    html += "</div>"
+
+    html += "</div>"
+    return html
+
+
+def _monthly_allocation_section_html(
+    tfsa_stock: "TfsaStockPortfolio",
+    rrsp: "RrspPortfolio",
+    tfsa_capital: float,
+    rrsp_capital: float,
+) -> str:
+    """Return HTML for Section 4 — Suggested Allocation for Next Month (two tables)."""
+    html = '<div class="section-box">'
+    html += "<h2>💰 Section 4 — Suggested Allocation for Next Month</h2>"
+
+    # TFSA table
+    html += '<div class="tfsa-box">'
+    html += f"<h3>📈 TFSA (Growth) — ${tfsa_capital:,.0f} Total</h3>"
+    html += (
+        '<p class="tfsa-meta">'
+        "Strategy: <strong>Direct stock ownership</strong> &nbsp;|&nbsp; "
+        "Focus: trend momentum, relative strength, controlled drawdown"
+        "</p>"
+    )
+    if tfsa_stock.selected:
+        cols = ["Ticker", "Sector", "Allocation ($)", "% of Portfolio", "Reasoning"]
+        headers_html = "".join(f"<th>{h}</th>" for h in cols)
+        rows_html = ""
+        for p in tfsa_stock.selected:
+            rows_html += "<tr>" + "".join(
+                f"<td>{v}</td>"
+                for v in [
+                    p.ticker,
+                    p.sector,
+                    f"${p.allocation:,.2f}",
+                    f"{p.pct_of_portfolio:.1f}%",
+                    p.reasoning,
+                ]
+            ) + "</tr>"
+        html += f"<table><thead><tr>{headers_html}</tr></thead><tbody>{rows_html}</tbody></table>"
+    else:
+        html += "<p>No qualifying growth positions for this period.</p>"
+    html += "</div>"
+
+    # RRSP table
+    html += '<div class="rrsp-box">'
+    html += f"<h3>🏦 RRSP (Stability) — ${rrsp_capital:,.0f} Total</h3>"
+    html += (
+        '<p class="rrsp-meta">'
+        "Strategy: <strong>Large-cap stocks &amp; ETFs</strong> &nbsp;|&nbsp; "
+        "Focus: consistency, low volatility, long-term thesis"
+        "</p>"
+    )
+    if rrsp.selected:
+        cols = ["Ticker", "Sector", "Allocation ($)", "% of Portfolio", "Reasoning"]
+        headers_html = "".join(f"<th>{h}</th>" for h in cols)
+        rows_html = ""
+        for p in rrsp.selected:
+            rows_html += "<tr>" + "".join(
+                f"<td>{v}</td>"
+                for v in [
+                    p.ticker,
+                    p.sector,
+                    f"${p.allocation:,.2f}",
+                    f"{p.pct_of_portfolio:.1f}%",
+                    p.long_term_thesis,
+                ]
+            ) + "</tr>"
+        html += f"<table><thead><tr>{headers_html}</tr></thead><tbody>{rows_html}</tbody></table>"
+    else:
+        html += "<p>No qualifying stability positions for this period.</p>"
+    html += "</div>"
+
+    html += "</div>"
     return html
 
 
 def build_monthly_portfolio_email(
     tfsa_stock: TfsaStockPortfolio,
-    tfsa_opts: TfsaAllocation,
     rrsp: RrspPortfolio,
-    tfsa_capital: float = 10_000.0,
-    rrsp_capital: float = 10_000.0,
+    tfsa_capital: float = 25_000.0,
+    rrsp_capital: float = 25_000.0,
 ) -> str:
-    """Return a complete HTML email for the monthly $20,000 TFSA + RRSP portfolio review.
+    """Return a complete HTML email for the monthly TFSA + RRSP portfolio review.
 
-    The email shows a well-balanced portfolio:
+    The email is structured into four sections:
 
-    * **TFSA** (*tfsa_capital*, default $10,000): growth stocks + long calls.
-    * **RRSP** (*rrsp_capital*, default $10,000): stability stocks & ETFs.
+    1. **Performance Summary** — simulated monthly performance estimates for
+       each account based on composite scoring.
+    2. **Insights and Learnings** — sector patterns, winning vs losing positions,
+       volatility and correlation commentary.
+    3. **Portfolio Rebalance Strategy** — recommended adjustments and conviction
+       narrative for TFSA (growth) and RRSP (stability) separately.
+    4. **Suggested Allocation for Next Month** — two tables (TFSA and RRSP) with
+       ticker, sector, dollar allocation, portfolio %, and reasoning.
 
     Parameters
     ----------
     tfsa_stock:
-        TFSA stock growth allocation (from :func:`~scanner.portfolio_allocator.allocate_tfsa_stock_portfolio`).
-    tfsa_opts:
-        TFSA long call options allocation (from :func:`~scanner.portfolio_allocator.allocate_tfsa_portfolio`).
+        TFSA stock growth allocation ($25,000 growth focus, 3–5 positions).
     rrsp:
-        RRSP stability allocation (from :func:`~scanner.portfolio_allocator.allocate_rrsp_portfolio`).
+        RRSP stability allocation ($25,000 stability focus, 3–6 positions).
     tfsa_capital:
-        Total TFSA capital (default $10,000).
+        Total TFSA capital (default $25,000).
     rrsp_capital:
-        Total RRSP capital (default $10,000).
+        Total RRSP capital (default $25,000).
     """
     today = date.today()
     month_year = today.strftime("%B %Y")
@@ -465,50 +747,10 @@ def build_monthly_portfolio_email(
         rrsp_capital=rrsp_capital,
     )
 
-    html += _monthly_portfolio_summary_html(
-        tfsa_capital=tfsa_capital,
-        rrsp_capital=rrsp_capital,
-        tfsa_opts_deployed=tfsa_opts.total_deployed,
-        tfsa_stock_deployed=tfsa_stock.total_deployed,
-        rrsp_deployed=rrsp.total_deployed,
-    )
-
-    # TFSA long calls section
-    html += '<div class="tfsa-box">'
-    html += "<h2>🇨🇦 TFSA — Long Calls (~30 DTE, Defined Risk)</h2>"
-    html += (
-        '<p class="tfsa-meta">'
-        "Strategy: <strong>Long Calls</strong> &nbsp;|&nbsp; "
-        "Target DTE: <strong>~30 days</strong> &nbsp;|&nbsp; "
-        f"Deployed: <strong>${tfsa_opts.total_deployed:,.2f}</strong>"
-        "</p>"
-    )
-    if tfsa_opts.selected:
-        cols = ["Ticker", "Sector", "Buy Strike", "Expiry", "Score", "Max Loss", "Allocation", "% TFSA"]
-        headers_html = "".join(f"<th>{h}</th>" for h in cols)
-        rows_html = ""
-        for t in tfsa_opts.selected:
-            pct_tfsa = t.allocation / tfsa_capital * 100 if tfsa_capital > 0 else 0.0
-            cells = "".join(
-                f"<td>{v}</td>"
-                for v in [
-                    t.ticker, t.sector,
-                    f"${t.buy_strike:.2f}", t.expiration,
-                    f"{t.tfsa_score:.1f}", f"${t.max_loss:.2f}",
-                    f"${t.allocation:,.2f}", f"{pct_tfsa:.1f}%",
-                ]
-            )
-            rows_html += f"<tr>{cells}</tr>"
-        html += f"<table><thead><tr>{headers_html}</tr></thead><tbody>{rows_html}</tbody></table>"
-    else:
-        html += "<p>No qualifying long calls found.</p>"
-    html += "</div>"
-
-    # TFSA growth stocks section
-    html += _tfsa_stock_to_html(tfsa_stock)
-
-    # RRSP stability section
-    html += _rrsp_to_html(rrsp)
+    html += _monthly_perf_section_html(tfsa_stock, rrsp, tfsa_capital, rrsp_capital)
+    html += _monthly_insights_section_html(tfsa_stock, rrsp)
+    html += _monthly_rebalance_section_html(tfsa_stock, rrsp)
+    html += _monthly_allocation_section_html(tfsa_stock, rrsp, tfsa_capital, rrsp_capital)
 
     html += _HTML_FOOT
     return html
