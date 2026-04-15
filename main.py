@@ -5,7 +5,7 @@ Scans public free data from Yahoo Finance for options trading opportunities
 on the TSX (Toronto Stock Exchange) and NASDAQ.
 
 Both the non-registered portfolio allocation (bull put spreads) and the
-TFSA-compatible allocation (call debit spreads) are always computed in
+TFSA-compatible allocation (long calls, ~30 DTE) are always computed in
 parallel and included in every run and email summary.
 
 Usage examples
@@ -25,6 +25,9 @@ Usage examples
   # Scan and email with explicit SMTP settings
   python main.py --email you@example.com --smtp-host smtp.gmail.com \\
                  --smtp-user sender@gmail.com --smtp-password "app-password"
+
+  # Also send the monthly $20,000 TFSA + RRSP portfolio review email
+  python main.py --email you@example.com --monthly-email you@example.com
 """
 
 import argparse
@@ -46,7 +49,7 @@ from scanner.data_fetcher import (
     get_price_history,
     get_stock_price,
 )
-from scanner.emailer import build_html_email, send_email
+from scanner.emailer import build_html_email, build_monthly_portfolio_email, send_email
 from scanner.portfolio_allocator import (
     PortfolioAllocation,
     RrspPortfolio,
@@ -460,6 +463,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=os.environ.get("SMTP_PASSWORD"),
         help="SMTP password or App Password (env: SMTP_PASSWORD).",
     )
+    parser.add_argument(
+        "--monthly-email",
+        metavar="ADDRESS",
+        default=None,
+        help=(
+            "Send a separate monthly $20,000 TFSA + RRSP portfolio review email "
+            "to this address (comma-separated for multiple recipients). "
+            "Uses the same SMTP credentials as --email. "
+            "Intended to be triggered once per month."
+        ),
+    )
     args = parser.parse_args(argv)
 
     # ── Build ticker list ──────────────────────────────────────────────────────
@@ -565,6 +579,76 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to send email: %s", exc)
+            return 1
+
+    # ── Optional monthly portfolio email ──────────────────────────────────────
+    if args.monthly_email:
+        monthly_recipients = [
+            addr.strip() for addr in args.monthly_email.split(",") if addr.strip()
+        ]
+
+        # $20,000 total portfolio: $10K TFSA (stocks + long calls) + $10K RRSP.
+        # TFSA split: 20% long calls ($2K), 80% growth stocks ($8K).
+        _MONTHLY_TFSA_CAPITAL: float = 10_000.0
+        _MONTHLY_RRSP_CAPITAL: float = 10_000.0
+        _MONTHLY_TFSA_CALLS_PCT: float = 0.20  # 20% of TFSA in long calls
+        tfsa_calls_capital = _MONTHLY_TFSA_CAPITAL * _MONTHLY_TFSA_CALLS_PCT
+        tfsa_stock_capital = _MONTHLY_TFSA_CAPITAL * (1.0 - _MONTHLY_TFSA_CALLS_PCT)
+
+        logger.info("Computing monthly $20,000 TFSA + RRSP portfolio …")
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            fut_m_tfsa_opts = executor.submit(
+                allocate_tfsa_portfolio,
+                suggestions,
+                tfsa_calls_capital,
+                3,
+                0.50,
+            )
+            fut_m_tfsa_stock = executor.submit(
+                allocate_tfsa_stock_portfolio,
+                tfsa_stock_histories,
+                tfsa_stock_capital,
+                5,
+                0.40,
+                0.40,
+                market_ret,
+            )
+            fut_m_rrsp = executor.submit(
+                allocate_rrsp_portfolio,
+                rrsp_histories,
+                _MONTHLY_RRSP_CAPITAL,
+                5,
+                0.40,
+            )
+            monthly_tfsa_opts = fut_m_tfsa_opts.result()
+            monthly_tfsa_stock = fut_m_tfsa_stock.result()
+            monthly_rrsp = fut_m_rrsp.result()
+
+        from datetime import date as _date
+
+        monthly_html = build_monthly_portfolio_email(
+            tfsa_stock=monthly_tfsa_stock,
+            tfsa_opts=monthly_tfsa_opts,
+            rrsp=monthly_rrsp,
+            tfsa_capital=_MONTHLY_TFSA_CAPITAL,
+            rrsp_capital=_MONTHLY_RRSP_CAPITAL,
+        )
+        monthly_subject = (
+            f"Monthly Portfolio Review — {_date.today().strftime('%B %Y')}"
+        )
+        try:
+            send_email(
+                monthly_html,
+                recipients=monthly_recipients,
+                smtp_host=args.smtp_host,
+                smtp_port=args.smtp_port,
+                smtp_user=args.smtp_user,
+                smtp_password=args.smtp_password,
+                subject=monthly_subject,
+            )
+            logger.info("Monthly portfolio email sent to %s", monthly_recipients)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to send monthly portfolio email: %s", exc)
             return 1
 
     return 0

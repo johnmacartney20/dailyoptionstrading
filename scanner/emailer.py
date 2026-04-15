@@ -183,10 +183,10 @@ def _portfolio_to_html(portfolio: PortfolioAllocation) -> str:
 def _tfsa_allocation_to_html(tfsa: TfsaAllocation) -> str:
     """Return an HTML snippet summarising the TFSA allocation."""
     html = '<div class="tfsa-box">'
-    html += "<h2>🇨🇦 TFSA Allocation — Call Debit Spreads (Defined Risk)</h2>"
+    html += "<h2>🇨🇦 TFSA Allocation — Long Calls (Single-Leg, Defined Risk)</h2>"
     html += (
         '<p class="tfsa-meta">'
-        "Strategy: <strong>Call Debit Spreads</strong> &nbsp;|&nbsp; "
+        "Strategy: <strong>Long Calls</strong> &nbsp;|&nbsp; "
         "Ranking: <strong>Expected upside potential</strong> (not probability of profit)"
         "</p>"
     )
@@ -199,8 +199,8 @@ def _tfsa_allocation_to_html(tfsa: TfsaAllocation) -> str:
 
     if tfsa.selected:
         cols = [
-            "Ticker", "Sector", "Strategy", "Buy Strike", "Sell Strike",
-            "Expiry", "Score", "Max Profit", "Max Loss", "Allocation", "% Portfolio",
+            "Ticker", "Sector", "Strategy", "Buy Strike",
+            "Expiry", "Score", "Max Loss", "Allocation", "% Portfolio",
         ]
         headers = "".join(f"<th>{h}</th>" for h in cols)
         rows_html = ""
@@ -212,10 +212,8 @@ def _tfsa_allocation_to_html(tfsa: TfsaAllocation) -> str:
                     t.sector,
                     t.strategy_type,
                     f"${t.buy_strike:.2f}",
-                    f"${t.sell_strike:.2f}",
                     t.expiration,
                     f"{t.tfsa_score:.1f}",
-                    f"${t.max_profit:.2f}",
                     f"${t.max_loss:.2f}",
                     f"${t.allocation:,.2f}",
                     f"{t.pct_of_portfolio:.1f}%",
@@ -224,7 +222,7 @@ def _tfsa_allocation_to_html(tfsa: TfsaAllocation) -> str:
             rows_html += f"<tr>{cells}</tr>"
         html += f"<table><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table>"
     else:
-        html += "<p>No qualifying call debit spreads found for TFSA allocation.</p>"
+        html += "<p>No qualifying long calls found for TFSA allocation.</p>"
 
     if tfsa.rejected:
         html += '<div class="tfsa-rejected"><strong>Rejected top candidates:</strong><ul>'
@@ -343,6 +341,181 @@ def _rrsp_to_html(rrsp: RrspPortfolio) -> str:
     return html
 
 
+# ── Monthly portfolio email ───────────────────────────────────────────────────
+
+_HTML_MONTHLY_HEAD = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  body  {{ font-family: Arial, sans-serif; font-size: 13px; color: #222; }}
+  h1    {{ color: #1a5276; font-size: 20px; margin-bottom: 4px; }}
+  h2    {{ color: #1a5276; font-size: 15px; margin-top: 24px; border-bottom: 2px solid #1a5276; padding-bottom: 4px; }}
+  table {{ border-collapse: collapse; width: 100%; margin-top: 8px; }}
+  th    {{ background: #1a5276; color: #fff; padding: 6px 10px; text-align: left; font-size: 12px; }}
+  td    {{ padding: 5px 10px; border-bottom: 1px solid #ddd; }}
+  tr:nth-child(even) td {{ background: #f2f2f2; }}
+  .meta {{ color: #555; font-size: 12px; }}
+  .disc {{ font-size: 11px; color: #888; margin-top: 20px; border-top: 1px solid #ccc; padding-top: 8px; }}
+  .summary-box {{ background: #eaf4fb; border: 1px solid #1a5276; border-radius: 4px;
+                  padding: 12px 16px; margin-bottom: 20px; }}
+  .summary-box h2 {{ color: #1a5276; border-bottom-color: #1a5276; }}
+  .tfsa-box {{ background: #eafaf1; border: 1px solid #1e8449; border-radius: 4px; padding: 12px 16px; margin-bottom: 20px; }}
+  .tfsa-box h2 {{ color: #1e8449; border-bottom-color: #1e8449; }}
+  .tfsa-summary {{ font-size: 12px; color: #333; margin-bottom: 8px; }}
+  .tfsa-summary strong {{ color: #1e8449; }}
+  .tfsa-meta {{ font-size: 11px; color: #555; margin-bottom: 6px; }}
+  .tfsa-rejected {{ font-size: 11px; color: #666; margin-top: 10px; }}
+  .tfsa-rejected li {{ margin: 2px 0; }}
+  .tfsa-stock-box {{ background: #fef9e7; border: 1px solid #b7950b; border-radius: 4px; padding: 12px 16px; margin-bottom: 20px; }}
+  .tfsa-stock-box h2 {{ color: #7d6608; border-bottom-color: #b7950b; }}
+  .tfsa-stock-exit {{ font-size: 11px; color: #555; margin-top: 10px; font-style: italic; }}
+  .rrsp-box {{ background: #f4ecf7; border: 1px solid #7d3c98; border-radius: 4px; padding: 12px 16px; margin-bottom: 20px; }}
+  .rrsp-box h2 {{ color: #6c3483; border-bottom-color: #7d3c98; }}
+  .rrsp-meta {{ font-size: 11px; color: #555; margin-bottom: 6px; }}
+  .rrsp-summary {{ font-size: 12px; color: #333; margin-bottom: 8px; }}
+  .rrsp-summary strong {{ color: #6c3483; }}
+  .balance-table {{ width: 100%; border-collapse: collapse; margin: 12px 0; }}
+  .balance-table th {{ background: #1a5276; color: #fff; padding: 6px 10px; text-align: left; }}
+  .balance-table td {{ padding: 6px 10px; border-bottom: 1px solid #ddd; }}
+</style>
+</head>
+<body>
+<h1>📊 Monthly Portfolio Review — {month_year}</h1>
+<p class="meta">Total portfolio value: <strong>${total_capital:,.0f}</strong>
+&nbsp;|&nbsp; TFSA: <strong>${tfsa_capital:,.0f}</strong>
+&nbsp;|&nbsp; RRSP: <strong>${rrsp_capital:,.0f}</strong></p>
+"""
+
+
+def _monthly_portfolio_summary_html(
+    tfsa_capital: float,
+    rrsp_capital: float,
+    tfsa_opts_deployed: float,
+    tfsa_stock_deployed: float,
+    rrsp_deployed: float,
+) -> str:
+    """Return an HTML overview table showing the high-level capital split."""
+    total = tfsa_capital + rrsp_capital
+    html = '<div class="summary-box">'
+    html += "<h2>💼 Portfolio Balance Overview</h2>"
+    html += (
+        "<table class='balance-table'>"
+        "<thead><tr>"
+        "<th>Account</th><th>Strategy</th><th>Allocated</th><th>% of Total</th>"
+        "</tr></thead><tbody>"
+    )
+    rows = [
+        ("TFSA", "Long Calls (options)", tfsa_opts_deployed),
+        ("TFSA", "Growth Stocks", tfsa_stock_deployed),
+        ("RRSP", "Stability Stocks &amp; ETFs", rrsp_deployed),
+    ]
+    for account, strategy, deployed in rows:
+        pct = deployed / total * 100 if total > 0 else 0.0
+        html += (
+            f"<tr><td>{account}</td><td>{strategy}</td>"
+            f"<td>${deployed:,.2f}</td><td>{pct:.1f}%</td></tr>"
+        )
+    total_deployed = tfsa_opts_deployed + tfsa_stock_deployed + rrsp_deployed
+    html += (
+        f"<tr><td><strong>Total</strong></td><td></td>"
+        f"<td><strong>${total_deployed:,.2f}</strong></td>"
+        f"<td><strong>{total_deployed / total * 100:.1f}%</strong></td></tr>"
+        if total > 0 else ""
+    )
+    html += "</tbody></table></div>"
+    return html
+
+
+def build_monthly_portfolio_email(
+    tfsa_stock: TfsaStockPortfolio,
+    tfsa_opts: TfsaAllocation,
+    rrsp: RrspPortfolio,
+    tfsa_capital: float = 10_000.0,
+    rrsp_capital: float = 10_000.0,
+) -> str:
+    """Return a complete HTML email for the monthly $20,000 TFSA + RRSP portfolio review.
+
+    The email shows an adequately balanced portfolio:
+
+    * **TFSA** (*tfsa_capital*, default $10,000): growth stocks + long calls.
+    * **RRSP** (*rrsp_capital*, default $10,000): stability stocks & ETFs.
+
+    Parameters
+    ----------
+    tfsa_stock:
+        TFSA stock growth allocation (from :func:`~scanner.portfolio_allocator.allocate_tfsa_stock_portfolio`).
+    tfsa_opts:
+        TFSA long call options allocation (from :func:`~scanner.portfolio_allocator.allocate_tfsa_portfolio`).
+    rrsp:
+        RRSP stability allocation (from :func:`~scanner.portfolio_allocator.allocate_rrsp_portfolio`).
+    tfsa_capital:
+        Total TFSA capital (default $10,000).
+    rrsp_capital:
+        Total RRSP capital (default $10,000).
+    """
+    from datetime import date as _date
+
+    today = _date.today()
+    month_year = today.strftime("%B %Y")
+    total_capital = tfsa_capital + rrsp_capital
+
+    html = _HTML_MONTHLY_HEAD.format(
+        month_year=month_year,
+        total_capital=total_capital,
+        tfsa_capital=tfsa_capital,
+        rrsp_capital=rrsp_capital,
+    )
+
+    html += _monthly_portfolio_summary_html(
+        tfsa_capital=tfsa_capital,
+        rrsp_capital=rrsp_capital,
+        tfsa_opts_deployed=tfsa_opts.total_deployed,
+        tfsa_stock_deployed=tfsa_stock.total_deployed,
+        rrsp_deployed=rrsp.total_deployed,
+    )
+
+    # TFSA long calls section
+    html += '<div class="tfsa-box">'
+    html += "<h2>🇨🇦 TFSA — Long Calls (~30 DTE, Defined Risk)</h2>"
+    html += (
+        '<p class="tfsa-meta">'
+        "Strategy: <strong>Long Calls</strong> &nbsp;|&nbsp; "
+        "Target DTE: <strong>~30 days</strong> &nbsp;|&nbsp; "
+        f"Deployed: <strong>${tfsa_opts.total_deployed:,.2f}</strong>"
+        "</p>"
+    )
+    if tfsa_opts.selected:
+        cols = ["Ticker", "Sector", "Buy Strike", "Expiry", "Score", "Max Loss", "Allocation", "% TFSA"]
+        headers_html = "".join(f"<th>{h}</th>" for h in cols)
+        rows_html = ""
+        for t in tfsa_opts.selected:
+            pct_tfsa = t.allocation / tfsa_capital * 100 if tfsa_capital > 0 else 0.0
+            cells = "".join(
+                f"<td>{v}</td>"
+                for v in [
+                    t.ticker, t.sector,
+                    f"${t.buy_strike:.2f}", t.expiration,
+                    f"{t.tfsa_score:.1f}", f"${t.max_loss:.2f}",
+                    f"${t.allocation:,.2f}", f"{pct_tfsa:.1f}%",
+                ]
+            )
+            rows_html += f"<tr>{cells}</tr>"
+        html += f"<table><thead><tr>{headers_html}</tr></thead><tbody>{rows_html}</tbody></table>"
+    else:
+        html += "<p>No qualifying long calls found.</p>"
+    html += "</div>"
+
+    # TFSA growth stocks section
+    html += _tfsa_stock_to_html(tfsa_stock)
+
+    # RRSP stability section
+    html += _rrsp_to_html(rrsp)
+
+    html += _HTML_FOOT
+    return html
+
+
 def build_html_email(
     suggestions: pd.DataFrame,
     exchange: str,
@@ -387,11 +560,30 @@ def send_email(
     smtp_port: int = 587,
     smtp_user: Optional[str] = None,
     smtp_password: Optional[str] = None,
+    subject: Optional[str] = None,
 ) -> None:
     """Send *html_body* as an HTML email to *recipients* via STARTTLS SMTP.
 
     Credentials fall back to the ``SMTP_USER`` / ``SMTP_PASSWORD`` environment
     variables when not supplied directly.
+
+    Parameters
+    ----------
+    html_body:
+        Full HTML content of the email.
+    recipients:
+        List of recipient email addresses.
+    smtp_host:
+        SMTP server hostname.
+    smtp_port:
+        SMTP server port (default 587 / STARTTLS).
+    smtp_user:
+        Sender login username; falls back to ``SMTP_USER`` env var.
+    smtp_password:
+        SMTP password; falls back to ``SMTP_PASSWORD`` env var.
+    subject:
+        Optional custom email subject.  Defaults to
+        ``"Daily Options Suggestions — YYYY-MM-DD"``.
 
     Raises
     ------
@@ -411,10 +603,10 @@ def send_email(
         )
 
     today = date.today().strftime("%Y-%m-%d")
-    subject = f"Daily Options Suggestions — {today}"
+    email_subject = subject if subject is not None else f"Daily Options Suggestions — {today}"
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
+    msg["Subject"] = email_subject
     msg["From"] = user
     msg["To"] = ", ".join(recipients)
     msg.attach(MIMEText(html_body, "html"))
