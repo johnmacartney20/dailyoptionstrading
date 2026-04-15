@@ -293,13 +293,13 @@ def test_tfsa_allocate_single_call():
     trade = result.selected[0]
     assert trade.ticker == "AAPL"
     assert trade.sector == "Technology"
-    assert trade.strategy_type == "Call Debit Spread"
+    assert trade.strategy_type == "Long Call"
     assert trade.buy_strike == 105.0
-    assert trade.sell_strike == 110.0  # 105 + 5 width
+    assert trade.sell_strike == 0.0       # not applicable for single-leg
     # max_loss = ask * 100 = 100
     assert trade.max_loss == pytest.approx(100.0)
-    # max_profit = (width - ask) * 100 = (5 - 1) * 100 = 400
-    assert trade.max_profit == pytest.approx(400.0)
+    # max_profit is unlimited (stored as 0.0)
+    assert trade.max_profit == pytest.approx(0.0)
 
 
 def test_tfsa_allocate_max_two_trades():
@@ -353,13 +353,13 @@ def test_tfsa_allocate_sorted_by_tfsa_score():
 
 
 def test_tfsa_allocate_fallback_spread_without_tfsa_spread():
-    """When tfsa_spread is missing, spread structure is inferred from strike."""
+    """Long calls don't use a sell leg; sell_strike is always 0.0 regardless of tfsa_spread."""
     row = _make_call_row("AAPL", strike=105.0, ask=1.0, tfsa_score=60.0)
     del row["tfsa_spread"]
     df = pd.DataFrame([row])
     result = allocate_tfsa_portfolio(df, total_capital=1000.0)
     assert result.num_open_trades == 1
-    assert result.selected[0].sell_strike == 110.0
+    assert result.selected[0].sell_strike == 0.0
 
 
 def test_tfsa_allocation_dataclass_properties():
@@ -367,8 +367,8 @@ def test_tfsa_allocation_dataclass_properties():
     assert ta.total_deployed == 0.0
     assert ta.num_open_trades == 0
     ta.selected.append(
-        TfsaTradeAllocation("AAPL", "Technology", "Call Debit Spread",
-                            105.0, 110.0, "2025-05-16", 60.0, 400.0, 100.0, 600.0, 60.0)
+        TfsaTradeAllocation("AAPL", "Technology", "Long Call",
+                            105.0, 0.0, "2025-05-16", 60.0, 0.0, 100.0, 600.0, 60.0)
     )
     assert ta.num_open_trades == 1
     assert ta.total_deployed == 600.0
