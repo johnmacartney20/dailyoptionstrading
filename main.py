@@ -26,7 +26,7 @@ Usage examples
   python main.py --email you@example.com --smtp-host smtp.gmail.com \\
                  --smtp-user sender@gmail.com --smtp-password "app-password"
 
-  # Also send the monthly $20,000 TFSA + RRSP portfolio review email
+  # Also send the monthly $50,000 TFSA + RRSP portfolio review email
   python main.py --email you@example.com --monthly-email you@example.com
 """
 
@@ -468,7 +468,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         metavar="ADDRESS",
         default=None,
         help=(
-            "Send a separate monthly $20,000 TFSA + RRSP portfolio review email "
+            "Send a separate monthly $50,000 TFSA + RRSP portfolio review email "
             "to this address (comma-separated for multiple recipients). "
             "Uses the same SMTP credentials as --email. "
             "Intended to be triggered once per month."
@@ -587,29 +587,19 @@ def main(argv: Optional[List[str]] = None) -> int:
             addr.strip() for addr in args.monthly_email.split(",") if addr.strip()
         ]
 
-        # $20,000 total portfolio: $10K TFSA (stocks + long calls) + $10K RRSP.
-        # TFSA split: 20% long calls ($2K), 80% growth stocks ($8K).
-        _MONTHLY_TFSA_CAPITAL: float = 10_000.0
-        _MONTHLY_RRSP_CAPITAL: float = 10_000.0
-        _MONTHLY_TFSA_CALLS_PCT: float = 0.20  # 20% of TFSA in long calls
-        tfsa_calls_capital = _MONTHLY_TFSA_CAPITAL * _MONTHLY_TFSA_CALLS_PCT
-        tfsa_stock_capital = _MONTHLY_TFSA_CAPITAL * (1.0 - _MONTHLY_TFSA_CALLS_PCT)
+        # $50,000 total portfolio: $25K TFSA (growth stocks) + $25K RRSP (stability).
+        # The monthly review focuses on stock allocations only — no short-term options.
+        _MONTHLY_TFSA_CAPITAL: float = 25_000.0
+        _MONTHLY_RRSP_CAPITAL: float = 25_000.0
 
-        logger.info("Computing monthly $20,000 TFSA + RRSP portfolio …")
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            fut_m_tfsa_opts = executor.submit(
-                allocate_tfsa_portfolio,
-                suggestions,
-                tfsa_calls_capital,
-                3,
-                0.50,
-            )
+        logger.info("Computing monthly $50,000 TFSA + RRSP portfolio …")
+        with ThreadPoolExecutor(max_workers=2) as executor:
             fut_m_tfsa_stock = executor.submit(
                 allocate_tfsa_stock_portfolio,
                 tfsa_stock_histories,
-                tfsa_stock_capital,
+                _MONTHLY_TFSA_CAPITAL,
                 5,
-                0.40,
+                0.35,
                 0.40,
                 market_ret,
             )
@@ -617,16 +607,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                 allocate_rrsp_portfolio,
                 rrsp_histories,
                 _MONTHLY_RRSP_CAPITAL,
-                5,
-                0.40,
+                6,
+                0.30,
             )
-            monthly_tfsa_opts = fut_m_tfsa_opts.result()
             monthly_tfsa_stock = fut_m_tfsa_stock.result()
             monthly_rrsp = fut_m_rrsp.result()
 
         monthly_html = build_monthly_portfolio_email(
             tfsa_stock=monthly_tfsa_stock,
-            tfsa_opts=monthly_tfsa_opts,
             rrsp=monthly_rrsp,
             tfsa_capital=_MONTHLY_TFSA_CAPITAL,
             rrsp_capital=_MONTHLY_RRSP_CAPITAL,
