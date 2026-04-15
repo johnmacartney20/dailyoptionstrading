@@ -436,7 +436,7 @@ def _monthly_perf_section_html(
     html += (
         '<p class="strategy-note">'
         "Returns below are <em>simulated estimates</em> derived from each position's "
-        "composite momentum and stability score. They reflect expected behaviour given "
+        "composite momentum and stability score. They reflect expected behavior given "
         "current trend, volatility, and liquidity conditions — not guaranteed results."
         "</p>"
     )
@@ -512,7 +512,7 @@ def _monthly_insights_section_html(
         return html
 
     # Sector performance: average composite score per sector
-    sector_scores: dict = {}
+    sector_scores: dict[str, list[float]] = {}
     for p in all_positions:
         sector_scores.setdefault(p.sector, []).append(p.composite_score)
     sector_avg = {s: sum(scores) / len(scores) for s, scores in sector_scores.items()}
