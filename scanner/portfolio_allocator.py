@@ -13,6 +13,12 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
+from .analyzer import (
+    StockScoreComponents,
+    score_stock_growth,
+    score_stock_stability,
+)
+
 logger = logging.getLogger(__name__)
 
 # ── Sector mapping ─────────────────────────────────────────────────────────────
@@ -522,6 +528,317 @@ def allocate_tfsa_portfolio(
                 max_loss=round(max_loss_per_contract, 2),
                 allocation=round(alloc, 2),
                 pct_of_portfolio=round(alloc / total_capital * 100, 1),
+            )
+        )
+
+    return result
+
+
+# ── TFSA stock allocation (growth model) ─────────────────────────────────────
+
+@dataclass
+class StockAllocation:
+    """A single stock position selected for the TFSA growth portfolio."""
+
+    ticker: str
+    sector: str
+    current_price: float
+    composite_score: float
+    allocation: float        # dollar amount allocated
+    pct_of_portfolio: float  # 0–100
+    reasoning: str           # key scoring factors in plain language
+
+
+@dataclass
+class TfsaStockPortfolio:
+    """TFSA stock portfolio allocation result (growth focus)."""
+
+    total_capital: float
+    selected: List[StockAllocation] = field(default_factory=list)
+    rejected: List[RejectedCandidate] = field(default_factory=list)
+
+    @property
+    def total_deployed(self) -> float:
+        return round(sum(t.allocation for t in self.selected), 2)
+
+    @property
+    def num_positions(self) -> int:
+        return len(self.selected)
+
+    @property
+    def exit_guidance(self) -> str:
+        if not self.selected:
+            return ""
+        tickers_str = ", ".join(t.ticker for t in self.selected)
+        return (
+            f"Exit guidance for {tickers_str}: "
+            "take partial profits at +15\u201325%; "
+            "allow remaining position to run up to +40\u201360% if trend remains intact; "
+            "exit early if price breaks below the 20-day moving average."
+        )
+
+
+def allocate_tfsa_stock_portfolio(
+    price_histories: Dict[str, Optional[pd.DataFrame]],
+    total_capital: float = 1000.0,
+    max_positions: int = 3,
+    max_position_pct: float = 0.50,
+    max_sector_pct: float = 0.50,
+    market_return_20d: float = 0.0,
+) -> TfsaStockPortfolio:
+    """Select 1–*max_positions* high-conviction stocks for TFSA growth allocation.
+
+    Composite scoring (higher = better, max \u2248 100 pts):
+
+    * **Trend Strength** (0\u201330 pts): price above 20/50-day MAs + momentum
+    * **Relative Strength** (0\u201320 pts): 20-day return vs broader market
+    * **Volatility Control** (0\u201315 pts): penalises excessively volatile stocks
+    * **Liquidity** (0\u201315 pts): log-scaled 20-day average daily volume
+    * **Drawdown Risk** (0\u201320 pts): penalises stocks extended above support
+
+    Portfolio constraints:
+    - 1\u2013*max_positions* stocks
+    - At most 1 stock per sector (enforces the \u2264 50 % sector cap)
+    - At most one stock from each correlation group
+    - Capital allocated proportionally to composite score (capped at
+      *max_position_pct*)
+
+    Parameters
+    ----------
+    price_histories:
+        Mapping of ticker \u2192 OHLCV DataFrame (from ``get_price_history``).
+        ``None`` values are silently skipped.
+    total_capital:
+        Total dollars to deploy.
+    max_positions:
+        Maximum number of stock positions (default ``3``).
+    max_position_pct:
+        Maximum fraction of *total_capital* per position (default ``0.50``).
+    max_sector_pct:
+        Maximum fraction of *total_capital* for a single sector (default
+        ``0.50``).  With \u2264 3 positions the practical rule is one per sector.
+    market_return_20d:
+        Trailing 20-day benchmark return used for relative-strength scoring.
+
+    Returns
+    -------
+    :class:`TfsaStockPortfolio`
+    """
+    result = TfsaStockPortfolio(total_capital=total_capital)
+    if not price_histories:
+        return result
+
+    # Score all candidates
+    candidates: List[tuple] = []
+    for ticker, hist in price_histories.items():
+        if hist is None or hist.empty:
+            continue
+        score = score_stock_growth(hist, market_return_20d)
+        if score.composite > 0:
+            price = float(hist["Close"].iloc[-1])
+            candidates.append((ticker, price, score))
+
+    # Sort by composite score descending
+    candidates.sort(key=lambda x: x[2].composite, reverse=True)
+
+    selected_tickers: List[str] = []
+    selected_sectors: List[str] = []
+    selected_items: List[tuple] = []
+
+    # Inspect a generous pool to surface useful rejection messages
+    candidate_pool = candidates[: max(max_positions * 5, 15)]
+
+    for ticker, price, score in candidate_pool:
+        if len(selected_items) >= max_positions:
+            break
+
+        sector = _get_sector(ticker)
+
+        if ticker in selected_tickers:
+            result.rejected.append(
+                RejectedCandidate(ticker, score.composite, "duplicate ticker")
+            )
+            continue
+
+        correlated_with = next(
+            (t for t in selected_tickers if _are_correlated(ticker, t)), None
+        )
+        if correlated_with:
+            result.rejected.append(
+                RejectedCandidate(
+                    ticker, score.composite, f"high correlation with {correlated_with}"
+                )
+            )
+            continue
+
+        if sector in selected_sectors:
+            result.rejected.append(
+                RejectedCandidate(ticker, score.composite, "duplicate sector exposure")
+            )
+            continue
+
+        selected_tickers.append(ticker)
+        selected_sectors.append(sector)
+        selected_items.append((ticker, price, score, sector))
+
+    if not selected_items:
+        return result
+
+    # ── Capital allocation ────────────────────────────────────────────────────
+    scores = [item[2].composite for item in selected_items]
+    allocations = _score_weighted_allocation(scores, total_capital, max_position_pct)
+
+    for (ticker, price, score, sector), alloc in zip(selected_items, allocations):
+        result.selected.append(
+            StockAllocation(
+                ticker=ticker,
+                sector=sector,
+                current_price=round(price, 2),
+                composite_score=round(score.composite, 2),
+                allocation=round(alloc, 2),
+                pct_of_portfolio=round(alloc / total_capital * 100, 1),
+                reasoning=score.reasoning,
+            )
+        )
+
+    return result
+
+
+# ── RRSP allocation (stability model) ─────────────────────────────────────────
+
+@dataclass
+class RrspStockAllocation:
+    """A single RRSP stock or ETF holding (stability focus)."""
+
+    ticker: str
+    sector: str
+    current_price: float
+    composite_score: float
+    allocation: float        # dollar amount allocated
+    pct_of_portfolio: float  # 0–100
+    long_term_thesis: str    # plain-language long-term reasoning
+
+
+@dataclass
+class RrspPortfolio:
+    """RRSP portfolio allocation result (stability focus)."""
+
+    total_capital: float
+    selected: List[RrspStockAllocation] = field(default_factory=list)
+    rejected: List[RejectedCandidate] = field(default_factory=list)
+
+    @property
+    def total_deployed(self) -> float:
+        return round(sum(t.allocation for t in self.selected), 2)
+
+    @property
+    def num_positions(self) -> int:
+        return len(self.selected)
+
+
+def allocate_rrsp_portfolio(
+    price_histories: Dict[str, Optional[pd.DataFrame]],
+    total_capital: float = 1000.0,
+    max_positions: int = 3,
+    max_position_pct: float = 0.50,
+) -> RrspPortfolio:
+    """Select 1–*max_positions* positions for RRSP stability allocation.
+
+    Prioritises large-cap stocks and ETFs using a stability-focused score:
+
+    * **Consistency** (0\u201330 pts): steady upward trend above long-term MAs
+    * **Low Volatility** (0\u201330 pts): directly rewards low annualised vol
+    * **Liquidity** (0\u201320 pts): high average daily volume
+    * **Trend Protection** (0\u201320 pts): not in steep drawdown
+
+    Portfolio constraints are the same as :func:`allocate_tfsa_stock_portfolio`
+    (no duplicate sectors, no correlated tickers, score-weighted capital).
+
+    Parameters
+    ----------
+    price_histories:
+        Mapping of ticker \u2192 OHLCV DataFrame (from ``get_price_history``).
+    total_capital:
+        Total dollars to deploy.
+    max_positions:
+        Maximum number of holdings (default ``3``).
+    max_position_pct:
+        Maximum fraction of *total_capital* per position (default ``0.50``).
+
+    Returns
+    -------
+    :class:`RrspPortfolio`
+    """
+    result = RrspPortfolio(total_capital=total_capital)
+    if not price_histories:
+        return result
+
+    candidates: List[tuple] = []
+    for ticker, hist in price_histories.items():
+        if hist is None or hist.empty:
+            continue
+        score = score_stock_stability(hist)
+        if score.composite > 0:
+            price = float(hist["Close"].iloc[-1])
+            candidates.append((ticker, price, score))
+
+    candidates.sort(key=lambda x: x[2].composite, reverse=True)
+
+    selected_tickers: List[str] = []
+    selected_sectors: List[str] = []
+    selected_items: List[tuple] = []
+
+    candidate_pool = candidates[: max(max_positions * 5, 15)]
+
+    for ticker, price, score in candidate_pool:
+        if len(selected_items) >= max_positions:
+            break
+
+        sector = _get_sector(ticker)
+
+        if ticker in selected_tickers:
+            result.rejected.append(
+                RejectedCandidate(ticker, score.composite, "duplicate ticker")
+            )
+            continue
+
+        correlated_with = next(
+            (t for t in selected_tickers if _are_correlated(ticker, t)), None
+        )
+        if correlated_with:
+            result.rejected.append(
+                RejectedCandidate(
+                    ticker, score.composite, f"high correlation with {correlated_with}"
+                )
+            )
+            continue
+
+        if sector in selected_sectors:
+            result.rejected.append(
+                RejectedCandidate(ticker, score.composite, "duplicate sector exposure")
+            )
+            continue
+
+        selected_tickers.append(ticker)
+        selected_sectors.append(sector)
+        selected_items.append((ticker, price, score, sector))
+
+    if not selected_items:
+        return result
+
+    scores = [item[2].composite for item in selected_items]
+    allocations = _score_weighted_allocation(scores, total_capital, max_position_pct)
+
+    for (ticker, price, score, sector), alloc in zip(selected_items, allocations):
+        result.selected.append(
+            RrspStockAllocation(
+                ticker=ticker,
+                sector=sector,
+                current_price=round(price, 2),
+                composite_score=round(score.composite, 2),
+                allocation=round(alloc, 2),
+                pct_of_portfolio=round(alloc / total_capital * 100, 1),
+                long_term_thesis=score.reasoning,
             )
         )
 
