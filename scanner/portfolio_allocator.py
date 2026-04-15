@@ -9,11 +9,9 @@ exclusions.
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import pandas as pd
-
-from .analyzer import _spread_width, suggest_call_debit_spread
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +78,8 @@ TICKER_SECTORS: Dict[str, str] = {
 }
 
 # Maximum allowed DTE spread (in calendar days) between any two selected trades.
-# Trades outside this window are rejected to avoid staggered risk exposure.
-_MAX_DTE_SPREAD: int = 7
+# Keeps all positions near the same expiry cycle (approximately 7–10 days window).
+_MAX_DTE_SPREAD: int = 10
 
 # Groups of tickers considered highly correlated with each other.
 # Only one trade per group is allowed in the portfolio.
@@ -142,16 +140,16 @@ class PortfolioAllocation:
 
 @dataclass
 class TfsaTradeAllocation:
-    """Details for a single accepted TFSA trade (long call / call debit spread)."""
+    """Details for a single accepted TFSA trade (long call – single-leg)."""
 
     ticker: str
     sector: str
-    strategy_type: str      # "Call Debit Spread"
-    buy_strike: float       # lower-strike call we buy
-    sell_strike: float      # higher-strike call we sell (defines the cap)
+    strategy_type: str      # "Long Call"
+    buy_strike: float       # strike of the call we buy
+    sell_strike: float      # 0.0 – unused for single-leg long calls
     expiration: str
     tfsa_score: float
-    max_profit: float       # per contract (dollars) = (width − ask) × 100
+    max_profit: float       # 0.0 – unlimited upside for a long call
     max_loss: float         # per contract (dollars) = ask × 100
     allocation: float       # dollar amount allocated
     pct_of_portfolio: float  # 0–100
@@ -393,13 +391,15 @@ def allocate_tfsa_portfolio(
     max_trades: int = 2,
     max_position_pct: float = 0.60,
 ) -> TfsaAllocation:
-    """Select 1–2 high-conviction call debit spread trades for a TFSA account.
+    """Select 1–2 high-conviction long call trades for a TFSA account.
 
     TFSA constraints applied here:
-    * **Calls only** – no put selling or credit spreads.
+    * **Single-leg calls only** – no spreads, no short premium, no multi-leg
+      strategies.  Brokers often do not permit short options inside registered
+      accounts; a plain long call is universally supported.
     * **Ranked by ``tfsa_score``** (expected upside potential) rather than
       probability of profit.
-    * **Defined risk**: max loss per trade is capped at the net debit paid.
+    * **Defined risk**: max loss per trade is strictly the net premium paid.
     * At most *max_trades* (default 2) simultaneous positions.
 
     Selection rules (same diversity filters as :func:`allocate_portfolio`):
@@ -504,35 +504,21 @@ def allocate_tfsa_portfolio(
         ticker = str(row["ticker"])
         sector = _get_sector(ticker)
 
-        # Use the pre-computed TFSA spread structure when available
-        spread_struct = str(row.get("tfsa_spread", ""))
-        if not spread_struct:
-            logger.debug(
-                "tfsa_spread missing for %s – computing from strike %s",
-                ticker, row["strike"],
-            )
-            spread_struct = suggest_call_debit_spread(float(row["strike"]))
-
-        buy_strike = float(row["strike"])
-        sell_strike = _parse_sell_strike_tfsa(spread_struct) or (
-            buy_strike + _spread_width(buy_strike)
-        )
-
         ask = float(row.get("ask", 0.0))
-        width = sell_strike - buy_strike
-        max_profit_per_contract = max((width - ask) * 100.0, 0.0)
+        buy_strike = float(row["strike"])
+        # Single-leg long call: max loss is the premium paid; upside is unlimited.
         max_loss_per_contract = ask * 100.0
 
         result.selected.append(
             TfsaTradeAllocation(
                 ticker=ticker,
                 sector=sector,
-                strategy_type="Call Debit Spread",
+                strategy_type="Long Call",
                 buy_strike=buy_strike,
-                sell_strike=sell_strike,
+                sell_strike=0.0,          # not applicable for single-leg
                 expiration=str(row.get("expiry", "")),
                 tfsa_score=float(row.get(sort_col, 0.0)),
-                max_profit=round(max_profit_per_contract, 2),
+                max_profit=0.0,           # unlimited upside for a long call
                 max_loss=round(max_loss_per_contract, 2),
                 allocation=round(alloc, 2),
                 pct_of_portfolio=round(alloc / total_capital * 100, 1),

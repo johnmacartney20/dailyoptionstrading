@@ -148,9 +148,9 @@ def _print_tfsa_allocation(tfsa: TfsaAllocation) -> None:
     dash = "-" * 88
 
     print(f"\n{sep}")
-    print("  TFSA ALLOCATION  —  Long Calls & Call Debit Spreads")
+    print("  TFSA ALLOCATION  —  Long Calls (Single-Leg Options)")
     print(sep)
-    print("  Strategy    : Call Debit Spreads  (no short premium — TFSA-compatible)")
+    print("  Strategy    : Long Calls  (single-leg, no short premium — TFSA-compatible)")
     print("  Ranking     : Expected upside potential  (not probability of profit)")
     print(f"  Trades      : {tfsa.num_open_trades} high-conviction trade(s)")
     print(f"  Deployed    : ${tfsa.total_deployed:,.2f}")
@@ -158,10 +158,10 @@ def _print_tfsa_allocation(tfsa: TfsaAllocation) -> None:
 
     if tfsa.selected:
         headers = [
-            "Ticker", "Sector", "Strategy", "Buy", "Sell", "Expiry",
-            "Score", "Max Profit", "Max Loss", "Allocation", "% Port",
+            "Ticker", "Sector", "Strategy", "Buy", "Expiry",
+            "Score", "Max Loss", "Allocation", "% Port",
         ]
-        col_w = [7, 14, 19, 7, 7, 12, 7, 11, 9, 12, 7]
+        col_w = [7, 14, 12, 7, 12, 7, 9, 12, 7]
 
         header_row = "  " + "  ".join(h.ljust(col_w[i]) for i, h in enumerate(headers))
         print(header_row)
@@ -173,10 +173,8 @@ def _print_tfsa_allocation(tfsa: TfsaAllocation) -> None:
                 t.sector,
                 t.strategy_type,
                 f"${t.buy_strike:.2f}",
-                f"${t.sell_strike:.2f}",
                 t.expiration,
                 f"{t.tfsa_score:.1f}",
-                f"${t.max_profit:.2f}",
                 f"${t.max_loss:.2f}",
                 f"${t.allocation:,.2f}",
                 f"{t.pct_of_portfolio:.1f}%",
@@ -184,7 +182,7 @@ def _print_tfsa_allocation(tfsa: TfsaAllocation) -> None:
             print("  " + "  ".join(str(v).ljust(col_w[i]) for i, v in enumerate(row)))
 
     else:
-        print("  No qualifying call debit spreads found for TFSA allocation.")
+        print("  No qualifying long calls found for TFSA allocation.")
 
     if tfsa.rejected:
         print(f"\n  Rejected top candidates:")
