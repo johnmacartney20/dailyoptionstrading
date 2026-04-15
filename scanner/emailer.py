@@ -59,6 +59,9 @@ _HTML_HEAD = """<!DOCTYPE html>
   .tfsa-stock-exit {{ font-size: 11px; color: #555; margin-top: 10px; font-style: italic; }}
   .rrsp-box {{ background: #f4ecf7; border: 1px solid #7d3c98; border-radius: 4px; padding: 12px 16px; margin-bottom: 20px; }}
   .rrsp-box h2 {{ color: #6c3483; border-bottom-color: #7d3c98; }}
+  .rrsp-meta {{ font-size: 11px; color: #555; margin-bottom: 6px; }}
+  .rrsp-summary {{ font-size: 12px; color: #333; margin-bottom: 8px; }}
+  .rrsp-summary strong {{ color: #6c3483; }}
 </style>
 </head>
 <body>
@@ -293,13 +296,13 @@ def _rrsp_to_html(rrsp: RrspPortfolio) -> str:
     html = '<div class="rrsp-box">'
     html += "<h2>🏦 RRSP Allocation — Stability Focus (Long-Term Holdings)</h2>"
     html += (
-        '<p class="tfsa-meta">'
+        '<p class="rrsp-meta">'
         "Strategy: <strong>Large-cap stocks &amp; ETFs</strong> &nbsp;|&nbsp; "
         "Emphasis: consistency over growth, low volatility"
         "</p>"
     )
     html += (
-        f'<p class="tfsa-summary">'
+        f'<p class="rrsp-summary">'
         f"Total deployed: <strong>${rrsp.total_deployed:,.2f}</strong>"
         f" &nbsp;|&nbsp; Positions: <strong>{rrsp.num_positions}</strong>"
         f"</p>"

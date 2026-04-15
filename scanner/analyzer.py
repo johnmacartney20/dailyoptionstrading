@@ -492,7 +492,7 @@ def score_stock_growth(
         stock_return_20d = current_price / float(close.iloc[-21]) - 1.0
         excess = stock_return_20d - market_return_20d
         if excess > 0:
-            rs_pts = min(excess / 0.10 * 20.0, 20.0)   # 10 % excess → 20 pts
+            rs_pts = min(excess / 0.10 * 20.0, 20.0)   # linear: each 1% excess → 2 pts, capped at 20 pts (10% excess)
         # underperformance floors at 0 (no negative)
 
     # ── 3. Volatility Control (0–15 pts) ─────────────────────────────────────
