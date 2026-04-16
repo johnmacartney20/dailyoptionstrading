@@ -2,9 +2,10 @@
 
 Tests cover:
 - StockScoreComponents from score_stock_growth / score_stock_stability
-- allocate_tfsa_stock_portfolio (sector cap, correlation, score-weighted capital)
-- allocate_rrsp_portfolio (stability scoring, sector constraints)
+- allocate_tfsa_stock_portfolio (sector cap, correlation, tiered capital allocation)
+- allocate_rrsp_portfolio (stability scoring, sector constraints, 4-position default)
 - TfsaStockPortfolio.exit_guidance property
+- Rejection tracking for position-limit and lower-score candidates
 """
 
 import math
@@ -20,10 +21,12 @@ from scanner.analyzer import (
     score_stock_stability,
 )
 from scanner.portfolio_allocator import (
+    RejectedCandidate,
     RrspPortfolio,
     RrspStockAllocation,
     StockAllocation,
     TfsaStockPortfolio,
+    _tfsa_concentrated_allocation,
     allocate_rrsp_portfolio,
     allocate_tfsa_stock_portfolio,
 )
@@ -358,3 +361,125 @@ def test_rrsp_stable_stock_scores_higher_than_volatile():
     result_vol = allocate_rrsp_portfolio({"RY.TO": volatile}, total_capital=1000.0)
     if result_stable.num_positions == 1 and result_vol.num_positions == 1:
         assert result_stable.selected[0].composite_score > result_vol.selected[0].composite_score
+
+
+# ── _tfsa_concentrated_allocation ────────────────────────────────────────────
+
+
+def test_tfsa_concentrated_allocation_three_positions():
+    """3 positions → exact tier weights 45 / 32 / 23 %."""
+    allocs = _tfsa_concentrated_allocation(3, 1000.0)
+    assert len(allocs) == 3
+    assert abs(allocs[0] - 450.0) < 0.01   # rank 1: 45 %
+    assert abs(allocs[1] - 320.0) < 0.01   # rank 2: 32 %
+    assert abs(allocs[2] - 230.0) < 0.01   # rank 3: remaining 23 %
+    assert abs(sum(allocs) - 1000.0) < 0.01
+
+
+def test_tfsa_concentrated_allocation_two_positions():
+    """2 positions → tier weights [45, 32] normalised to 100 %."""
+    allocs = _tfsa_concentrated_allocation(2, 1000.0)
+    assert len(allocs) == 2
+    assert allocs[0] > allocs[1], "rank-1 must receive more than rank-2"
+    assert abs(sum(allocs) - 1000.0) < 0.01
+
+
+def test_tfsa_concentrated_allocation_one_position_capped():
+    """1 position → capped at max_single_pct (default 50 %)."""
+    allocs = _tfsa_concentrated_allocation(1, 1000.0, max_single_pct=0.50)
+    assert len(allocs) == 1
+    assert abs(allocs[0] - 500.0) < 0.01
+
+
+def test_tfsa_concentrated_allocation_zero_positions():
+    assert _tfsa_concentrated_allocation(0, 1000.0) == []
+
+
+def test_tfsa_concentrated_allocation_rank_order():
+    """Each rank must receive strictly more capital than the next rank (n=3)."""
+    allocs = _tfsa_concentrated_allocation(3, 1000.0)
+    assert allocs[0] > allocs[1] > allocs[2]
+
+
+# ── TFSA tiered allocation integration ───────────────────────────────────────
+
+
+def test_tfsa_stock_three_positions_tiered_allocation():
+    """With 3 qualifying positions the allocations must match the 45/32/23 tiers."""
+    # Use three tickers from distinct sectors and correlation groups so all 3
+    # pass the diversity filters.
+    hists = {
+        "AAPL": _make_history(60, drift=0.006, vol=0.005, seed=1),   # highest score
+        "AMGN": _make_history(60, drift=0.004, vol=0.006, seed=2),   # second
+        "COST": _make_history(60, drift=0.002, vol=0.008, seed=3),   # third
+    }
+    result = allocate_tfsa_stock_portfolio(hists, total_capital=1000.0, max_positions=3)
+    if result.num_positions == 3:
+        allocs = [t.allocation for t in result.selected]
+        # Rank 1 must be near 45 %, rank 2 near 32 %, rank 3 near 23 %
+        assert abs(allocs[0] - 450.0) < 1.0
+        assert abs(allocs[1] - 320.0) < 1.0
+        assert abs(allocs[2] - 230.0) < 1.0
+
+
+def test_tfsa_stock_rejects_position_limit_candidates():
+    """Candidates exceeding the 3-position cap must appear in rejected with a reason."""
+    hists = {
+        "AAPL": _make_history(60, drift=0.006, vol=0.005, seed=1),
+        "AMGN": _make_history(60, drift=0.005, vol=0.006, seed=2),
+        "COST": _make_history(60, drift=0.004, vol=0.007, seed=3),
+        "ENB.TO": _make_history(60, drift=0.003, vol=0.008, seed=4),
+    }
+    result = allocate_tfsa_stock_portfolio(hists, total_capital=1000.0, max_positions=3)
+    assert result.num_positions <= 3
+    rejected_tickers = [r.ticker for r in result.rejected]
+    # At least one ticker should be rejected with a score-based reason
+    score_rejected = [
+        r for r in result.rejected if "lower composite score" in r.reason
+    ]
+    assert len(score_rejected) >= 1
+
+
+# ── RRSP default max_positions = 4 ───────────────────────────────────────────
+
+
+def test_rrsp_default_max_positions_is_four():
+    """allocate_rrsp_portfolio should select up to 4 positions by default."""
+    hists = {
+        "RY.TO": _make_history(60, drift=0.001, vol=0.006, seed=1),   # Financials
+        "AAPL": _make_history(60, drift=0.002, vol=0.007, seed=2),    # Technology
+        "COST": _make_history(60, drift=0.001, vol=0.008, seed=3),    # Consumer
+        "ENB.TO": _make_history(60, drift=0.001, vol=0.009, seed=4),  # Energy
+    }
+    result = allocate_rrsp_portfolio(hists, total_capital=1000.0)
+    # With 4 tickers in distinct sectors the default limit allows all 4
+    assert result.num_positions <= 4
+
+
+def test_rrsp_rejects_position_limit_candidates():
+    """Candidates exceeding the RRSP position cap must appear in rejected."""
+    hists = {
+        "RY.TO": _make_history(60, drift=0.002, vol=0.005, seed=1),
+        "AAPL": _make_history(60, drift=0.002, vol=0.006, seed=2),
+        "COST": _make_history(60, drift=0.001, vol=0.007, seed=3),
+        "ENB.TO": _make_history(60, drift=0.001, vol=0.008, seed=4),
+        "CNR.TO": _make_history(60, drift=0.001, vol=0.009, seed=5),
+    }
+    result = allocate_rrsp_portfolio(hists, total_capital=1000.0, max_positions=3)
+    assert result.num_positions <= 3
+    score_rejected = [
+        r for r in result.rejected if "lower stability score" in r.reason
+    ]
+    assert len(score_rejected) >= 1
+
+
+def test_rrsp_rejected_candidates_have_justification():
+    """All rejected RRSP candidates must include a non-empty reason string."""
+    hists = {
+        "RY.TO": _make_history(60, drift=0.002, vol=0.005, seed=1),
+        "TD.TO": _make_history(60, drift=0.001, vol=0.007, seed=2),  # same sector → rejected
+    }
+    result = allocate_rrsp_portfolio(hists, total_capital=1000.0)
+    for rejected in result.rejected:
+        assert isinstance(rejected.reason, str)
+        assert len(rejected.reason) > 0

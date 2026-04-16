@@ -256,6 +256,35 @@ def _score_weighted_allocation(
     return capped
 
 
+def _tfsa_concentrated_allocation(
+    n: int,
+    total_capital: float,
+    max_single_pct: float = 0.50,
+) -> List[float]:
+    """Return tiered concentrated capital allocations for TFSA stock positions.
+
+    Applies strict conviction-based concentration (higher rank = more capital):
+
+    * Rank 1 (highest composite score): targets 40–50 % → midpoint **45 %**
+    * Rank 2: targets 30–35 % → midpoint **32 %**
+    * Rank 3: receives the **remaining** allocation → ~23 %
+
+    For fewer than 3 selected positions the tier weights are normalised to
+    sum to 100 % of *total_capital*.  A single selected position is
+    additionally capped at *max_single_pct* (default 50 %) to avoid
+    over-concentration in a single name.
+    """
+    _TIER_WEIGHTS = [0.45, 0.32, 0.23]
+    if n == 0:
+        return []
+    weights = _TIER_WEIGHTS[:n]
+    total_weight = sum(weights)
+    allocs = [total_capital * w / total_weight for w in weights]
+    if n == 1:
+        allocs[0] = min(allocs[0], total_capital * max_single_pct)
+    return allocs
+
+
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def allocate_portfolio(
@@ -607,37 +636,48 @@ def allocate_tfsa_stock_portfolio(
     max_sector_pct: float = 0.50,
     market_return_20d: float = 0.0,
 ) -> TfsaStockPortfolio:
-    """Select 1–*max_positions* high-conviction stocks for TFSA growth allocation.
+    """Select up to *max_positions* high-conviction stocks for TFSA growth.
 
-    Composite scoring (higher = better, max \u2248 100 pts):
+    Applies **strict selection pressure**: all candidates are ranked by composite
+    score and only the top *max_positions* (default 3) qualify.  Every
+    non-selected candidate is recorded in :attr:`TfsaStockPortfolio.rejected`
+    with an explicit reason.
 
-    * **Trend Strength** (0\u201330 pts): price above 20/50-day MAs + momentum
-    * **Relative Strength** (0\u201320 pts): 20-day return vs broader market
-    * **Volatility Control** (0\u201315 pts): penalises excessively volatile stocks
-    * **Liquidity** (0\u201315 pts): log-scaled 20-day average daily volume
-    * **Drawdown Risk** (0\u201320 pts): penalises stocks extended above support
+    Composite scoring (higher = better, max ≈ 100 pts):
+
+    * **Trend Strength** (0–30 pts): price above 20/50-day MAs + momentum
+    * **Relative Strength** (0–20 pts): 20-day return vs broader market
+    * **Volatility Control** (0–15 pts): penalises excessively volatile stocks
+    * **Liquidity** (0–15 pts): log-scaled 20-day average daily volume
+    * **Drawdown Risk** (0–20 pts): penalises stocks extended above support
+
+    Capital is allocated with conviction-based concentration via
+    :func:`_tfsa_concentrated_allocation`:
+
+    * Rank 1 (highest score): 40–50 % → target 45 %
+    * Rank 2: 30–35 % → target 32 %
+    * Rank 3: remaining allocation → ~23 %
 
     Portfolio constraints:
-    - 1\u2013*max_positions* stocks
-    - At most 1 stock per sector (enforces the \u2264 50 % sector cap)
+    - At most *max_positions* stocks (default 3)
+    - At most 1 stock per sector
     - At most one stock from each correlation group
-    - Capital allocated proportionally to composite score (capped at
-      *max_position_pct*)
 
     Parameters
     ----------
     price_histories:
-        Mapping of ticker \u2192 OHLCV DataFrame (from ``get_price_history``).
+        Mapping of ticker → OHLCV DataFrame (from ``get_price_history``).
         ``None`` values are silently skipped.
     total_capital:
         Total dollars to deploy.
     max_positions:
         Maximum number of stock positions (default ``3``).
     max_position_pct:
-        Maximum fraction of *total_capital* per position (default ``0.50``).
+        Maximum fraction of *total_capital* for a single position when only
+        one position is selected (default ``0.50``).
     max_sector_pct:
         Maximum fraction of *total_capital* for a single sector (default
-        ``0.50``).  With \u2264 3 positions the practical rule is one per sector.
+        ``0.50``).  With ≤ 3 positions the practical rule is one per sector.
     market_return_20d:
         Trailing 20-day benchmark return used for relative-strength scoring.
 
@@ -671,7 +711,15 @@ def allocate_tfsa_stock_portfolio(
 
     for ticker, price, score in candidate_pool:
         if len(selected_items) >= max_positions:
-            break
+            # Position limit reached – reject all remaining pool candidates explicitly.
+            result.rejected.append(
+                RejectedCandidate(
+                    ticker,
+                    score.composite,
+                    f"lower composite score – outside top-{max_positions} selection",
+                )
+            )
+            continue
 
         sector = _get_sector(ticker)
 
@@ -702,12 +750,23 @@ def allocate_tfsa_stock_portfolio(
         selected_sectors.append(sector)
         selected_items.append((ticker, price, score, sector))
 
+    # Candidates beyond the inspected pool are also rejected (lower score)
+    for ticker, price, score in candidates[len(candidate_pool):]:
+        result.rejected.append(
+            RejectedCandidate(
+                ticker,
+                score.composite,
+                f"lower composite score – outside top-{max_positions} selection",
+            )
+        )
+
     if not selected_items:
         return result
 
-    # ── Capital allocation ────────────────────────────────────────────────────
-    scores = [item[2].composite for item in selected_items]
-    allocations = _score_weighted_allocation(scores, total_capital, max_position_pct)
+    # ── Capital allocation (conviction-based tiers) ───────────────────────────
+    allocations = _tfsa_concentrated_allocation(
+        len(selected_items), total_capital, max_single_pct=max_position_pct
+    )
 
     for (ticker, price, score, sector), alloc in zip(selected_items, allocations):
         result.selected.append(
@@ -760,29 +819,36 @@ class RrspPortfolio:
 def allocate_rrsp_portfolio(
     price_histories: Dict[str, Optional[pd.DataFrame]],
     total_capital: float = 1000.0,
-    max_positions: int = 3,
+    max_positions: int = 4,
     max_position_pct: float = 0.50,
 ) -> RrspPortfolio:
-    """Select 1–*max_positions* positions for RRSP stability allocation.
+    """Select up to *max_positions* positions for RRSP stability allocation.
+
+    Applies **strict selection pressure**: all candidates are ranked by
+    stability score and only the top *max_positions* (default 4) that also
+    meet the diversity constraints are accepted.  Every non-selected candidate
+    is recorded in :attr:`RrspPortfolio.rejected` with an explicit reason.
 
     Prioritises large-cap stocks and ETFs using a stability-focused score:
 
-    * **Consistency** (0\u201330 pts): steady upward trend above long-term MAs
-    * **Low Volatility** (0\u201330 pts): directly rewards low annualised vol
-    * **Liquidity** (0\u201320 pts): high average daily volume
-    * **Trend Protection** (0\u201320 pts): not in steep drawdown
+    * **Consistency** (0–30 pts): steady upward trend above long-term MAs
+    * **Low Volatility** (0–30 pts): directly rewards low annualised vol
+    * **Liquidity** (0–20 pts): high average daily volume
+    * **Trend Protection** (0–20 pts): not in steep drawdown
 
-    Portfolio constraints are the same as :func:`allocate_tfsa_stock_portfolio`
-    (no duplicate sectors, no correlated tickers, score-weighted capital).
+    Each selected position includes a ``long_term_thesis`` that serves as the
+    required justification for inclusion.  Portfolio constraints are the same
+    as :func:`allocate_tfsa_stock_portfolio` (no duplicate sectors, no
+    correlated tickers, score-weighted capital).
 
     Parameters
     ----------
     price_histories:
-        Mapping of ticker \u2192 OHLCV DataFrame (from ``get_price_history``).
+        Mapping of ticker → OHLCV DataFrame (from ``get_price_history``).
     total_capital:
         Total dollars to deploy.
     max_positions:
-        Maximum number of holdings (default ``3``).
+        Maximum number of holdings (default ``4``).
     max_position_pct:
         Maximum fraction of *total_capital* per position (default ``0.50``).
 
@@ -813,7 +879,15 @@ def allocate_rrsp_portfolio(
 
     for ticker, price, score in candidate_pool:
         if len(selected_items) >= max_positions:
-            break
+            # Position limit reached – reject remaining pool candidates explicitly.
+            result.rejected.append(
+                RejectedCandidate(
+                    ticker,
+                    score.composite,
+                    f"lower stability score – outside top-{max_positions} selection",
+                )
+            )
+            continue
 
         sector = _get_sector(ticker)
 
@@ -843,6 +917,16 @@ def allocate_rrsp_portfolio(
         selected_tickers.append(ticker)
         selected_sectors.append(sector)
         selected_items.append((ticker, price, score, sector))
+
+    # Candidates beyond the inspected pool are also rejected (lower score)
+    for ticker, price, score in candidates[len(candidate_pool):]:
+        result.rejected.append(
+            RejectedCandidate(
+                ticker,
+                score.composite,
+                f"lower stability score – outside top-{max_positions} selection",
+            )
+        )
 
     if not selected_items:
         return result
