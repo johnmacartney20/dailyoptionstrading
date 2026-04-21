@@ -16,8 +16,8 @@ def _make_options_df(*rows) -> pd.DataFrame:
     defaults = {
         "strike": 95.0,
         "bid": 1.5,
-        "ask": 1.7,
-        "openInterest": 200,
+        "ask": 1.6,       # spread = 0.1/1.5 ≈ 6.7 % < 10 %
+        "openInterest": 1000,
         "volume": 50,
         "impliedVolatility": 0.3,
         "inTheMoney": False,
@@ -39,16 +39,18 @@ def _expiry(days: int = 30) -> str:
 
 
 def test_screen_options_returns_valid_candidates():
-    df = _make_options_df({"strike": 95.0, "bid": 1.5, "openInterest": 200})
+    df = _make_options_df({"strike": 95.0, "bid": 1.5, "openInterest": 1000})
     result = screen_options(df, stock_price=100.0, option_type="put", expiry=_expiry(30), ticker="AAPL")
     assert not result.empty
     assert "annualized_return" in result.columns
     assert "score" in result.columns
     assert "otm_pct" in result.columns
+    assert "risk_adjusted_return" in result.columns
+    assert "spread_structure" in result.columns
 
 
 def test_screen_options_filters_low_bid():
-    df = _make_options_df({"strike": 95.0, "bid": 0.01, "openInterest": 200})
+    df = _make_options_df({"strike": 95.0, "bid": 0.01, "openInterest": 1000})
     result = screen_options(df, stock_price=100.0, option_type="put", expiry=_expiry(30), ticker="AAPL")
     assert result.empty
 
@@ -61,21 +63,35 @@ def test_screen_options_filters_low_open_interest():
 
 def test_screen_options_filters_itm_put():
     """A put with strike above stock price is ITM and should be rejected."""
-    df = _make_options_df({"strike": 110.0, "bid": 1.5, "openInterest": 200})
+    df = _make_options_df({"strike": 110.0, "bid": 1.5, "openInterest": 1000})
+    result = screen_options(df, stock_price=100.0, option_type="put", expiry=_expiry(30), ticker="AAPL")
+    assert result.empty
+
+
+def test_screen_options_filters_atm_put():
+    """A put at or within 3 % of the stock price should be excluded (too close to ATM)."""
+    df = _make_options_df({"strike": 99.0, "bid": 2.0, "ask": 2.1, "openInterest": 1000})
     result = screen_options(df, stock_price=100.0, option_type="put", expiry=_expiry(30), ticker="AAPL")
     assert result.empty
 
 
 def test_screen_options_filters_too_far_otm():
-    """A put strike 15 % below stock price exceeds max_otm_pct (10 %) – reject."""
-    df = _make_options_df({"strike": 85.0, "bid": 0.5, "openInterest": 200})
+    """A put strike 20 % below stock price exceeds max_otm_pct (15 %) – reject."""
+    df = _make_options_df({"strike": 80.0, "bid": 0.5, "openInterest": 1000})
+    result = screen_options(df, stock_price=100.0, option_type="put", expiry=_expiry(30), ticker="AAPL")
+    assert result.empty
+
+
+def test_screen_options_filters_wide_bid_ask_spread():
+    """Options with a bid-ask spread > 10 % of the bid should be excluded."""
+    df = _make_options_df({"strike": 95.0, "bid": 1.0, "ask": 2.0, "openInterest": 1000})
     result = screen_options(df, stock_price=100.0, option_type="put", expiry=_expiry(30), ticker="AAPL")
     assert result.empty
 
 
 def test_screen_options_filters_expired():
     """Options that have already expired (DTE < min_dte) should be rejected."""
-    df = _make_options_df({"strike": 95.0, "bid": 1.5, "openInterest": 200})
+    df = _make_options_df({"strike": 95.0, "bid": 1.5, "openInterest": 1000})
     result = screen_options(df, stock_price=100.0, option_type="put", expiry=_expiry(1), ticker="AAPL")
     # min_dte is 7 – 1 day should be filtered out
     assert result.empty
@@ -83,14 +99,14 @@ def test_screen_options_filters_expired():
 
 def test_screen_options_filters_too_far_out():
     """Expiry beyond max_dte (60 days) should be rejected."""
-    df = _make_options_df({"strike": 95.0, "bid": 1.5, "openInterest": 200})
+    df = _make_options_df({"strike": 95.0, "bid": 1.5, "openInterest": 1000})
     result = screen_options(df, stock_price=100.0, option_type="put", expiry=_expiry(90), ticker="AAPL")
     assert result.empty
 
 
 def test_screen_options_call():
     """Covered call: OTM call with strike 5 % above stock price should qualify."""
-    df = _make_options_df({"strike": 105.0, "bid": 1.5, "openInterest": 200})
+    df = _make_options_df({"strike": 105.0, "bid": 1.5, "openInterest": 1000})
     result = screen_options(df, stock_price=100.0, option_type="call", expiry=_expiry(30), ticker="AAPL")
     assert not result.empty
 
@@ -103,13 +119,21 @@ def test_screen_options_empty_df():
 def test_screen_options_sorted_by_score():
     """Higher-quality options should appear first."""
     df = _make_options_df(
-        {"strike": 95.0, "bid": 0.5, "openInterest": 50},   # lower quality
-        {"strike": 96.0, "bid": 2.5, "openInterest": 500},  # higher quality
+        {"strike": 95.0, "bid": 0.5, "ask": 0.6, "openInterest": 600},   # lower quality
+        {"strike": 96.0, "bid": 2.5, "ask": 2.6, "openInterest": 2000},  # higher quality
     )
     result = screen_options(df, stock_price=100.0, option_type="put", expiry=_expiry(30), ticker="AAPL")
     assert not result.empty
     scores = result["score"].tolist()
     assert scores == sorted(scores, reverse=True)
+
+
+def test_screen_options_includes_spread_structure():
+    """Each qualifying result should include a suggested spread structure string."""
+    df = _make_options_df({"strike": 95.0, "bid": 1.5, "openInterest": 1000})
+    result = screen_options(df, stock_price=100.0, option_type="put", expiry=_expiry(30), ticker="AAPL")
+    assert not result.empty
+    assert result["spread_structure"].iloc[0] == "Sell 95P / Buy 90P"
 
 
 # ── generate_suggestions ──────────────────────────────────────────────────────
@@ -127,8 +151,8 @@ def test_generate_suggestions_empty_dataframes():
 
 def test_generate_suggestions_sorted_by_score():
     expiry = _expiry(30)
-    low_df = _make_options_df({"strike": 95.0, "bid": 0.5, "openInterest": 50})
-    high_df = _make_options_df({"strike": 96.0, "bid": 3.0, "openInterest": 1000})
+    low_df = _make_options_df({"strike": 95.0, "bid": 0.5, "ask": 0.6, "openInterest": 600})
+    high_df = _make_options_df({"strike": 96.0, "bid": 3.0, "ask": 3.1, "openInterest": 2000})
 
     screened_low = screen_options(low_df, 100.0, "put", expiry, "LOW")
     screened_high = screen_options(high_df, 100.0, "put", expiry, "HIGH")
@@ -141,8 +165,8 @@ def test_generate_suggestions_sorted_by_score():
 
 def test_generate_suggestions_combines_calls_and_puts():
     expiry = _expiry(30)
-    put_df = _make_options_df({"strike": 95.0, "bid": 1.5, "openInterest": 200})
-    call_df = _make_options_df({"strike": 105.0, "bid": 1.5, "openInterest": 200})
+    put_df = _make_options_df({"strike": 95.0, "bid": 1.5, "openInterest": 1000})
+    call_df = _make_options_df({"strike": 105.0, "bid": 1.5, "openInterest": 1000})
 
     screened_put = screen_options(put_df, 100.0, "put", expiry, "AAPL")
     screened_call = screen_options(call_df, 100.0, "call", expiry, "AAPL")
@@ -156,9 +180,11 @@ def test_generate_suggestions_combines_calls_and_puts():
 
 def test_generate_suggestions_output_columns():
     expiry = _expiry(30)
-    df = _make_options_df({"strike": 95.0, "bid": 1.5, "openInterest": 200})
+    df = _make_options_df({"strike": 95.0, "bid": 1.5, "openInterest": 1000})
     screened = screen_options(df, 100.0, "put", expiry, "AAPL")
     suggestions = generate_suggestions([screened])
 
-    for col in ("ticker", "option_type", "expiry", "dte", "strike", "score"):
+    for col in ("ticker", "option_type", "expiry", "dte", "strike", "score",
+                "risk_adjusted_return", "spread_structure"):
         assert col in suggestions.columns
+

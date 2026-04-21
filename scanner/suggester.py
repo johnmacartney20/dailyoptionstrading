@@ -29,7 +29,13 @@ OUTPUT_COLUMNS = [
     "impliedVolatility",
     "otm_pct",
     "annualized_return",
+    "bid_ask_spread_pct",
+    "risk_adjusted_return",
+    "max_spread_loss",
+    "spread_structure",
     "score",
+    "tfsa_score",
+    "tfsa_spread",
     "inTheMoney",
     "contractSymbol",
 ]
@@ -48,9 +54,12 @@ def screen_options(
 
     * DTE within the configured window.
     * Bid ≥ ``min_bid``.
-    * Open interest ≥ ``min_open_interest``.
-    * Annualised return ≥ ``min_annualized_return_pct``.
-    * OTM % between 0 and ``max_otm_pct`` (OTM or at-the-money only).
+    * Open interest ≥ ``min_open_interest`` (500 – enforces liquidity).
+    * Bid-ask spread ≤ ``max_bid_ask_spread_pct`` of the bid price.
+    * OTM % between ``min_otm_pct`` (3 %) and ``max_otm_pct`` (15 %).
+      Trades within 3 % of the stock price are excluded as too close to ATM.
+    * Annualised return ≥ ``min_annualized_return_pct`` (floor only).
+    * Max spread loss ≤ ``max_spread_loss`` (small-account compatibility).
 
     Returns an empty :class:`~pandas.DataFrame` when no options qualify.
     """
@@ -62,22 +71,33 @@ def screen_options(
     # Enrich with computed metrics
     df = enrich_options(options_df, stock_price, option_type, expiry, ticker)
 
-    # ── DTE filter (applied per-row for robustness) ────────────────────────────
+    # ── DTE filter ────────────────────────────────────────────────────────────
     df = df[
         (df["dte"] >= params["min_dte"]) & (df["dte"] <= params["max_dte"])
     ]
     if df.empty:
         return pd.DataFrame()
 
-    # ── Numeric filters ────────────────────────────────────────────────────────
+    # ── Numeric filters ───────────────────────────────────────────────────────
     df = df[df["bid"] >= params["min_bid"]]
     df = df[
         df["openInterest"].fillna(0).astype(int) >= params["min_open_interest"]
     ]
     df = df[df["annualized_return"] >= params["min_annualized_return_pct"]]
 
-    # ── Moneyness filter (OTM or ATM only) ────────────────────────────────────
-    df = df[(df["otm_pct"] >= 0.0) & (df["otm_pct"] <= params["max_otm_pct"])]
+    # ── Liquidity: bid-ask spread filter ─────────────────────────────────────
+    df = df[
+        df["bid_ask_spread_pct"].fillna(float("inf")) <= params["max_bid_ask_spread_pct"]
+    ]
+
+    # ── Moneyness filter: require min_otm_pct ≤ OTM % ≤ max_otm_pct ─────────
+    df = df[
+        (df["otm_pct"] >= params["min_otm_pct"])
+        & (df["otm_pct"] <= params["max_otm_pct"])
+    ]
+
+    # ── Small-account: max spread loss filter ─────────────────────────────────
+    df = df[df["max_spread_loss"] <= params["max_spread_loss"]]
 
     if df.empty:
         return pd.DataFrame()

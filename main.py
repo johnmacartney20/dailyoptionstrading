@@ -4,6 +4,10 @@
 Scans public free data from Yahoo Finance for options trading opportunities
 on the TSX (Toronto Stock Exchange) and NASDAQ.
 
+Both the non-registered portfolio allocation (bull put spreads) and the
+TFSA-compatible allocation (long calls, ~30 DTE) are always computed in
+parallel and included in every run and email summary.
+
 Usage examples
 --------------
   # Scan all exchanges (default)
@@ -21,6 +25,9 @@ Usage examples
   # Scan and email with explicit SMTP settings
   python main.py --email you@example.com --smtp-host smtp.gmail.com \\
                  --smtp-user sender@gmail.com --smtp-password "app-password"
+
+  # Also send the monthly $50,000 TFSA + RRSP portfolio review email
+  python main.py --email you@example.com --monthly-email you@example.com
 """
 
 import argparse
@@ -28,18 +35,31 @@ import logging
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from typing import List, Optional
 
 import pandas as pd
 
-from scanner.config import NASDAQ_TICKERS, SCREENING_PARAMS, TSX_TICKERS
+from scanner.config import NASDAQ_TICKERS, RRSP_TICKERS, SCREENING_PARAMS, TSX_TICKERS
 from scanner.data_fetcher import (
     get_expiration_dates,
+    get_market_return,
     get_options_chain,
+    get_price_history,
     get_stock_price,
 )
-from scanner.emailer import build_html_email, send_email
+from scanner.emailer import build_html_email, build_monthly_portfolio_email, send_email
+from scanner.portfolio_allocator import (
+    PortfolioAllocation,
+    RrspPortfolio,
+    TfsaAllocation,
+    TfsaStockPortfolio,
+    allocate_portfolio,
+    allocate_rrsp_portfolio,
+    allocate_tfsa_portfolio,
+    allocate_tfsa_stock_portfolio,
+)
 from scanner.suggester import generate_suggestions, screen_options
 
 # ── Logging ────────────────────────────────────────────────────────────────────
@@ -86,6 +106,217 @@ def scan_ticker(ticker: str) -> List[pd.DataFrame]:
     return results
 
 
+def _print_portfolio_allocation(portfolio: PortfolioAllocation) -> None:
+    """Pretty-print the portfolio allocation summary to stdout."""
+    sep = "=" * 88
+    dash = "-" * 88
+
+    print(f"\n{sep}")
+    print("  PORTFOLIO ALLOCATION  —  $1,000 Total Capital Deployment")
+    print(sep)
+    print(f"  Total capital deployed : ${portfolio.total_deployed:,.2f}")
+    print(f"  Open trades suggested  : {portfolio.num_open_trades}")
+    print()
+
+    if portfolio.selected:
+        headers = [
+            "Ticker", "Sector", "Strategy", "Short", "Long", "Expiry",
+            "Score", "Max Profit", "Max Loss", "Allocation", "% Port",
+        ]
+        col_w = [7, 14, 16, 7, 7, 12, 7, 11, 9, 12, 7]
+
+        header_row = "  " + "  ".join(h.ljust(col_w[i]) for i, h in enumerate(headers))
+        print(header_row)
+        print("  " + dash[:len(header_row) - 2])
+
+        for t in portfolio.selected:
+            row = [
+                t.ticker,
+                t.sector,
+                t.strategy_type,
+                f"${t.short_strike:.2f}",
+                f"${t.long_strike:.2f}",
+                t.expiration,
+                f"{t.score:.1f}",
+                f"${t.max_profit:.2f}",
+                f"${t.max_loss:.2f}",
+                f"${t.allocation:,.2f}",
+                f"{t.pct_of_portfolio:.1f}%",
+            ]
+            print("  " + "  ".join(str(v).ljust(col_w[i]) for i, v in enumerate(row)))
+
+    else:
+        print("  No qualifying put spreads found for portfolio allocation.")
+
+    if portfolio.rejected:
+        print(f"\n  Rejected top candidates:")
+        for r in portfolio.rejected:
+            print(f"    • {r.ticker:<10}  score {r.score:5.1f}  —  {r.reason}")
+
+    print(f"{sep}\n")
+
+
+def _print_tfsa_stock_allocation(tfsa_stock: TfsaStockPortfolio) -> None:
+    """Pretty-print the TFSA stock portfolio summary to stdout."""
+    sep = "=" * 88
+    dash = "-" * 88
+
+    print(f"\n{sep}")
+    print("  TFSA ALLOCATION  —  Stock Portfolio (Growth Focus)")
+    print(sep)
+    print("  Strategy    : Direct stock ownership  (growth-oriented, TFSA-compatible)")
+    print("  Scoring     : Trend(30%) + RS(20%) + Vol(15%) + Liquidity(15%) + Drawdown(20%)")
+    print(f"  Positions   : {tfsa_stock.num_positions} high-conviction stock(s)")
+    print(f"  Deployed    : ${tfsa_stock.total_deployed:,.2f}")
+    print()
+
+    if tfsa_stock.selected:
+        headers = [
+            "Ticker", "Sector", "Price", "Score", "Allocation", "% Port", "Reasoning",
+        ]
+        col_w = [7, 14, 8, 7, 12, 7, 30]
+
+        header_row = "  " + "  ".join(h.ljust(col_w[i]) for i, h in enumerate(headers))
+        print(header_row)
+        print("  " + dash[:len(header_row) - 2])
+
+        for t in tfsa_stock.selected:
+            row = [
+                t.ticker,
+                t.sector,
+                f"${t.current_price:.2f}",
+                f"{t.composite_score:.1f}",
+                f"${t.allocation:,.2f}",
+                f"{t.pct_of_portfolio:.1f}%",
+                t.reasoning[:30],
+            ]
+            print("  " + "  ".join(str(v).ljust(col_w[i]) for i, v in enumerate(row)))
+
+        print()
+        print(f"  {tfsa_stock.exit_guidance}")
+
+    else:
+        print("  No qualifying stocks found for TFSA stock allocation.")
+
+    if tfsa_stock.rejected:
+        print(f"\n  Rejected candidates:")
+        for r in tfsa_stock.rejected:
+            print(f"    • {r.ticker:<10}  score {r.score:5.1f}  —  {r.reason}")
+
+    print(f"{sep}\n")
+
+
+def _print_rrsp_allocation(rrsp: RrspPortfolio) -> None:
+    """Pretty-print the RRSP portfolio summary to stdout."""
+    sep = "=" * 88
+    dash = "-" * 88
+
+    print(f"\n{sep}")
+    print("  RRSP ALLOCATION  —  Stability Focus (Long-Term Holdings)")
+    print(sep)
+    print("  Strategy    : Large-cap stocks & ETFs  (consistency over growth)")
+    print(f"  Positions   : {rrsp.num_positions} stable position(s)")
+    print(f"  Deployed    : ${rrsp.total_deployed:,.2f}")
+    print()
+
+    if rrsp.selected:
+        headers = [
+            "Ticker", "Sector", "Price", "Score", "Allocation", "% Port", "Long-Term Thesis",
+        ]
+        col_w = [7, 14, 8, 7, 12, 7, 30]
+
+        header_row = "  " + "  ".join(h.ljust(col_w[i]) for i, h in enumerate(headers))
+        print(header_row)
+        print("  " + dash[:len(header_row) - 2])
+
+        for t in rrsp.selected:
+            row = [
+                t.ticker,
+                t.sector,
+                f"${t.current_price:.2f}",
+                f"{t.composite_score:.1f}",
+                f"${t.allocation:,.2f}",
+                f"{t.pct_of_portfolio:.1f}%",
+                t.long_term_thesis[:30],
+            ]
+            print("  " + "  ".join(str(v).ljust(col_w[i]) for i, v in enumerate(row)))
+
+    else:
+        print("  No qualifying positions found for RRSP allocation.")
+
+    if rrsp.rejected:
+        print(f"\n  Rejected candidates:")
+        for r in rrsp.rejected:
+            print(f"    • {r.ticker:<10}  score {r.score:5.1f}  —  {r.reason}")
+
+    print(f"{sep}\n")
+
+
+def _fetch_price_histories(tickers: List[str]) -> dict:
+    """Fetch price histories for a list of tickers in parallel."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _fetch_one(ticker: str):
+        return ticker, get_price_history(ticker, period="3mo")
+
+    histories = {}
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        for ticker, hist in executor.map(_fetch_one, tickers):
+            if hist is not None and not hist.empty:
+                histories[ticker] = hist
+    return histories
+
+
+def _print_tfsa_allocation(tfsa: TfsaAllocation) -> None:
+    """Pretty-print the TFSA allocation summary to stdout."""
+    sep = "=" * 88
+    dash = "-" * 88
+
+    print(f"\n{sep}")
+    print("  TFSA ALLOCATION  —  Long Calls (Single-Leg Options)")
+    print(sep)
+    print("  Strategy    : Long Calls  (single-leg, no short premium — TFSA-compatible)")
+    print("  Ranking     : Expected upside potential  (not probability of profit)")
+    print(f"  Trades      : {tfsa.num_open_trades} high-conviction trade(s)")
+    print(f"  Deployed    : ${tfsa.total_deployed:,.2f}")
+    print()
+
+    if tfsa.selected:
+        headers = [
+            "Ticker", "Sector", "Strategy", "Buy", "Expiry",
+            "Score", "Max Loss", "Allocation", "% Port",
+        ]
+        col_w = [7, 14, 12, 7, 12, 7, 9, 12, 7]
+
+        header_row = "  " + "  ".join(h.ljust(col_w[i]) for i, h in enumerate(headers))
+        print(header_row)
+        print("  " + dash[:len(header_row) - 2])
+
+        for t in tfsa.selected:
+            row = [
+                t.ticker,
+                t.sector,
+                t.strategy_type,
+                f"${t.buy_strike:.2f}",
+                t.expiration,
+                f"{t.tfsa_score:.1f}",
+                f"${t.max_loss:.2f}",
+                f"${t.allocation:,.2f}",
+                f"{t.pct_of_portfolio:.1f}%",
+            ]
+            print("  " + "  ".join(str(v).ljust(col_w[i]) for i, v in enumerate(row)))
+
+    else:
+        print("  No qualifying long calls found for TFSA allocation.")
+
+    if tfsa.rejected:
+        print(f"\n  Rejected top candidates:")
+        for r in tfsa.rejected:
+            print(f"    • {r.ticker:<10}  score {r.score:5.1f}  —  {r.reason}")
+
+    print(f"{sep}\n")
+
+
 def _print_suggestions(suggestions: pd.DataFrame, top: int) -> None:
     """Pretty-print *suggestions* to stdout, split by strategy."""
     today = date.today().strftime("%Y-%m-%d")
@@ -112,9 +343,10 @@ def _print_suggestions(suggestions: pd.DataFrame, top: int) -> None:
         "bid": "Bid",
         "ask": "Ask",
         "openInterest": "OI",
-        "annualized_return": "Ann.Ret %",
         "otm_pct": "OTM %",
         "impliedVolatility": "IV %",
+        "risk_adjusted_return": "Risk-Adj",
+        "spread_structure": "Spread Structure",
         "score": "Score",
     }
 
@@ -134,7 +366,7 @@ def _print_suggestions(suggestions: pd.DataFrame, top: int) -> None:
 
         # Format numeric columns for readability
         for col, fmt in [
-            ("Ann.Ret %", 1),
+            ("Risk-Adj", 3),
             ("Score", 1),
             ("Stock $", 2),
             ("Strike", 2),
@@ -231,6 +463,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=os.environ.get("SMTP_PASSWORD"),
         help="SMTP password or App Password (env: SMTP_PASSWORD).",
     )
+    parser.add_argument(
+        "--monthly-email",
+        metavar="ADDRESS",
+        default=None,
+        help=(
+            "Send a separate monthly $50,000 TFSA + RRSP portfolio review email "
+            "to this address (comma-separated for multiple recipients). "
+            "Uses the same SMTP credentials as --email. "
+            "Intended to be triggered once per month."
+        ),
+    )
     args = parser.parse_args(argv)
 
     # ── Build ticker list ──────────────────────────────────────────────────────
@@ -265,7 +508,47 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.strategy != "all":
         suggestions = suggestions[suggestions["option_type"] == args.strategy]
 
-    # ── Display ────────────────────────────────────────────────────────────────
+    # ── Options portfolio allocation ───────────────────────────────────────────
+    # Both options allocations are independent — run them in parallel.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        fut_portfolio = executor.submit(allocate_portfolio, suggestions)
+        fut_tfsa_opts = executor.submit(allocate_tfsa_portfolio, suggestions)
+        portfolio = fut_portfolio.result()
+        tfsa_opts = fut_tfsa_opts.result()
+
+    _print_portfolio_allocation(portfolio)
+    _print_tfsa_allocation(tfsa_opts)
+
+    # ── Stock-based TFSA (growth) & RRSP (stability) allocations ──────────────
+    logger.info("Fetching price histories for TFSA/RRSP stock scoring …")
+    tfsa_stock_histories = _fetch_price_histories(tickers)
+    rrsp_histories = _fetch_price_histories(RRSP_TICKERS)
+    market_ret = get_market_return("SPY", period_days=20)
+    logger.debug("SPY 20-day return used as market benchmark: %.2f%%", market_ret * 100)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        fut_tfsa_stock = executor.submit(
+            allocate_tfsa_stock_portfolio,
+            tfsa_stock_histories,
+            1000.0,
+            3,
+            0.50,
+            0.50,
+            market_ret,
+        )
+        fut_rrsp = executor.submit(
+            allocate_rrsp_portfolio,
+            rrsp_histories,
+            1000.0,
+            3,
+            0.50,
+        )
+        tfsa_stock = fut_tfsa_stock.result()
+        rrsp = fut_rrsp.result()
+
+    _print_tfsa_stock_allocation(tfsa_stock)
+    _print_rrsp_allocation(rrsp)
+
     _print_suggestions(suggestions, top=args.top)
 
     # ── Optional CSV export ────────────────────────────────────────────────────
@@ -276,7 +559,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     # ── Optional email delivery ────────────────────────────────────────────────
     if args.email:
         recipients = [addr.strip() for addr in args.email.split(",") if addr.strip()]
-        html = build_html_email(suggestions, exchange=args.exchange, top=args.top)
+        html = build_html_email(
+            suggestions,
+            exchange=args.exchange,
+            top=args.top,
+            portfolio=portfolio,
+            tfsa_allocation=tfsa_opts,
+            tfsa_stock=tfsa_stock,
+            rrsp=rrsp,
+        )
         try:
             send_email(
                 html,
@@ -288,6 +579,62 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to send email: %s", exc)
+            return 1
+
+    # ── Optional monthly portfolio email ──────────────────────────────────────
+    if args.monthly_email:
+        monthly_recipients = [
+            addr.strip() for addr in args.monthly_email.split(",") if addr.strip()
+        ]
+
+        # $50,000 total portfolio: $25K TFSA (growth stocks) + $25K RRSP (stability).
+        # The monthly review focuses on stock allocations only — no short-term options.
+        _MONTHLY_TFSA_CAPITAL: float = 25_000.0
+        _MONTHLY_RRSP_CAPITAL: float = 25_000.0
+
+        logger.info("Computing monthly $50,000 TFSA + RRSP portfolio …")
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            fut_m_tfsa_stock = executor.submit(
+                allocate_tfsa_stock_portfolio,
+                tfsa_stock_histories,
+                _MONTHLY_TFSA_CAPITAL,
+                5,
+                0.35,
+                0.40,
+                market_ret,
+            )
+            fut_m_rrsp = executor.submit(
+                allocate_rrsp_portfolio,
+                rrsp_histories,
+                _MONTHLY_RRSP_CAPITAL,
+                6,
+                0.30,
+            )
+            monthly_tfsa_stock = fut_m_tfsa_stock.result()
+            monthly_rrsp = fut_m_rrsp.result()
+
+        monthly_html = build_monthly_portfolio_email(
+            tfsa_stock=monthly_tfsa_stock,
+            rrsp=monthly_rrsp,
+            tfsa_capital=_MONTHLY_TFSA_CAPITAL,
+            rrsp_capital=_MONTHLY_RRSP_CAPITAL,
+        )
+        monthly_subject = (
+            f"Monthly Portfolio Review — {date.today().strftime('%B %Y')}"
+        )
+        try:
+            send_email(
+                monthly_html,
+                recipients=monthly_recipients,
+                smtp_host=args.smtp_host,
+                smtp_port=args.smtp_port,
+                smtp_user=args.smtp_user,
+                smtp_password=args.smtp_password,
+                subject=monthly_subject,
+            )
+            logger.info("Monthly portfolio email sent to %s", monthly_recipients)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to send monthly portfolio email: %s", exc)
             return 1
 
     return 0
