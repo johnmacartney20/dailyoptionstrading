@@ -28,3 +28,6 @@ htmlcov/
 
 # Output files
 *.csv
+
+# Run logs
+runs/

@@ -24,6 +24,8 @@ OUTPUT_COLUMNS = [
     "stock_price",
     "bid",
     "ask",
+    "mid",
+    "spread_pct",
     "openInterest",
     "volume",
     "impliedVolatility",

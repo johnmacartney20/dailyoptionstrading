@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from scanner.suggester import generate_suggestions, screen_options
+from scanner.config import SCREENING_PARAMS
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -126,7 +127,6 @@ def test_screen_options_sorted_by_score():
     assert not result.empty
     scores = result["score"].tolist()
     assert scores == sorted(scores, reverse=True)
-
 
 def test_screen_options_includes_spread_structure():
     """Each qualifying result should include a suggested spread structure string."""

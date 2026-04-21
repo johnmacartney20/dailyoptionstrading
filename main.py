@@ -33,10 +33,12 @@ Usage examples
 import argparse
 import logging
 import os
+import json
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from pathlib import Path
 from typing import List, Optional
 
 import pandas as pd
@@ -60,6 +62,11 @@ from scanner.portfolio_allocator import (
     allocate_tfsa_portfolio,
     allocate_tfsa_stock_portfolio,
 )
+from scanner.risk import (
+    add_position_sizing_columns,
+    allocate_under_total_notional,
+    filter_unaffordable_trades,
+)
 from scanner.suggester import generate_suggestions, screen_options
 
 # ── Logging ────────────────────────────────────────────────────────────────────
@@ -72,6 +79,146 @@ logger = logging.getLogger(__name__)
 
 # Pause between full-ticker scans to stay well within Yahoo Finance rate limits.
 _TICKER_DELAY = 0.5
+
+
+def _log_run(
+    raw_suggestions: pd.DataFrame,
+    final_suggestions: pd.DataFrame,
+    run_log_dir: str,
+    args: argparse.Namespace,
+    artifacts: Optional[dict[str, pd.DataFrame]] = None,
+    meta_extra: Optional[dict] = None,
+) -> None:
+    """Persist run outputs for forward evaluation (CSV + JSON metadata)."""
+    out_dir = Path(run_log_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    stamp = time.strftime("%Y-%m-%d_%H%M%S")
+    base = f"{stamp}_{args.exchange}_{args.strategy}"
+
+    raw_path = out_dir / f"{base}_raw.csv"
+    final_path = out_dir / f"{base}_final.csv"
+    meta_path = out_dir / f"{base}_meta.json"
+
+    raw_suggestions.to_csv(raw_path, index=False)
+    final_suggestions.to_csv(final_path, index=False)
+
+    written_artifacts: dict[str, str] = {}
+    if artifacts:
+        for name, df in artifacts.items():
+            try:
+                artifact_path = out_dir / f"{base}_{name}.csv"
+                df.to_csv(artifact_path, index=False)
+                written_artifacts[name] = str(artifact_path.name)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Failed to write artifact %s: %s", name, exc)
+
+    meta = {
+        "timestamp": stamp,
+        "exchange": args.exchange,
+        "strategy": args.strategy,
+        "top": args.top,
+        "screening_params": SCREENING_PARAMS,
+        "counts": {
+            "raw": int(len(raw_suggestions)),
+            "final": int(len(final_suggestions)),
+        },
+        "artifacts": written_artifacts,
+        "risk_controls": {
+            "account_cash": getattr(args, "account_cash", None),
+            "max_notional_per_trade": getattr(args, "max_notional_per_trade", None),
+            "max_total_notional": getattr(args, "max_total_notional", None),
+            "max_trades_per_ticker": getattr(args, "max_trades_per_ticker", None),
+        },
+    }
+
+    if meta_extra:
+        meta.update(meta_extra)
+
+    meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+    logger.info("Run log saved to %s", out_dir)
+
+
+def _portfolio_allocation_to_df(portfolio: PortfolioAllocation) -> pd.DataFrame:
+    if not getattr(portfolio, "selected", None):
+        return pd.DataFrame()
+    return pd.DataFrame(
+        [
+            {
+                "ticker": t.ticker,
+                "sector": t.sector,
+                "strategy": t.strategy_type,
+                "short_strike": t.short_strike,
+                "long_strike": t.long_strike,
+                "expiry": t.expiration,
+                "score": t.score,
+                "max_profit": t.max_profit,
+                "max_loss": t.max_loss,
+                "allocation": t.allocation,
+                "pct_of_portfolio": t.pct_of_portfolio,
+            }
+            for t in portfolio.selected
+        ]
+    )
+
+
+def _tfsa_allocation_to_df(tfsa: TfsaAllocation) -> pd.DataFrame:
+    if not getattr(tfsa, "selected", None):
+        return pd.DataFrame()
+    return pd.DataFrame(
+        [
+            {
+                "ticker": t.ticker,
+                "sector": t.sector,
+                "strategy": t.strategy_type,
+                "buy_strike": t.buy_strike,
+                "expiry": t.expiration,
+                "tfsa_score": t.tfsa_score,
+                "max_loss": t.max_loss,
+                "allocation": t.allocation,
+                "pct_of_portfolio": t.pct_of_portfolio,
+            }
+            for t in tfsa.selected
+        ]
+    )
+
+
+def _tfsa_stock_to_df(tfsa_stock: TfsaStockPortfolio) -> pd.DataFrame:
+    if not getattr(tfsa_stock, "selected", None):
+        return pd.DataFrame()
+    return pd.DataFrame(
+        [
+            {
+                "ticker": t.ticker,
+                "sector": t.sector,
+                "price": t.current_price,
+                "score": t.composite_score,
+                "allocation": t.allocation,
+                "pct_of_portfolio": t.pct_of_portfolio,
+                "reasoning": t.reasoning,
+            }
+            for t in tfsa_stock.selected
+        ]
+    )
+
+
+def _rrsp_to_df(rrsp: RrspPortfolio) -> pd.DataFrame:
+    if not getattr(rrsp, "selected", None):
+        return pd.DataFrame()
+    return pd.DataFrame(
+        [
+            {
+                "ticker": t.ticker,
+                "sector": t.sector,
+                "price": t.current_price,
+                "score": t.composite_score,
+                "allocation": t.allocation,
+                "pct_of_portfolio": t.pct_of_portfolio,
+                "thesis": t.long_term_thesis,
+            }
+            for t in rrsp.selected
+        ]
+    )
 
 
 def scan_ticker(ticker: str) -> List[pd.DataFrame]:
@@ -431,6 +578,53 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         help="Optional path to save full results as CSV.",
     )
+
+    # ── Risk controls / sizing (optional) ───────────────────────────────────
+    parser.add_argument(
+        "--account-cash",
+        type=float,
+        default=None,
+        help=(
+            "Optional account cash (in quote currency). Used to compute per-trade max contracts. "
+            "If provided, rows with max_contracts < 1 are removed."
+        ),
+    )
+    parser.add_argument(
+        "--max-notional-per-trade",
+        type=float,
+        default=None,
+        help=(
+            "Optional cap for notional exposure per trade idea (per row). "
+            "Used to compute max_contracts."
+        ),
+    )
+    parser.add_argument(
+        "--max-total-notional",
+        type=float,
+        default=None,
+        help=(
+            "Optional cap for total notional exposure across the selected set. "
+            "Applies a greedy allocator and returns only rows that fit within the budget."
+        ),
+    )
+    parser.add_argument(
+        "--max-trades-per-ticker",
+        type=int,
+        default=None,
+        help="Optional cap on number of trade ideas selected per ticker (used with --max-total-notional).",
+    )
+
+    # ── Run logging (forward test) ─────────────────────────────────────────-
+    parser.add_argument(
+        "--run-log-dir",
+        default=os.environ.get("RUN_LOG_DIR", "runs"),
+        help="Directory to write run logs (CSV + JSON metadata).",
+    )
+    parser.add_argument(
+        "--run-log",
+        action="store_true",
+        help="Enable writing run logs (CSV + JSON metadata).",
+    )
     # ── Email options ──────────────────────────────────────────────────────────
     parser.add_argument(
         "--email",
@@ -474,6 +668,49 @@ def main(argv: Optional[List[str]] = None) -> int:
             "Intended to be triggered once per month."
         ),
     )
+
+    parser.add_argument(
+        "--monthly-tfsa-capital",
+        type=float,
+        default=25_000.0,
+        help="TFSA capital used in the monthly review email (default: 25000).",
+    )
+    parser.add_argument(
+        "--monthly-rrsp-capital",
+        type=float,
+        default=25_000.0,
+        help="RRSP capital used in the monthly review email (default: 25000).",
+    )
+    parser.add_argument(
+        "--monthly-tfsa-max-positions",
+        type=int,
+        default=5,
+        help="Max TFSA stock positions in the monthly review (default: 5).",
+    )
+    parser.add_argument(
+        "--monthly-tfsa-max-position-pct",
+        type=float,
+        default=0.35,
+        help="Max per-position fraction for TFSA monthly review (default: 0.35).",
+    )
+    parser.add_argument(
+        "--monthly-tfsa-max-sector-pct",
+        type=float,
+        default=0.40,
+        help="Max sector fraction for TFSA monthly review (default: 0.40).",
+    )
+    parser.add_argument(
+        "--monthly-rrsp-max-positions",
+        type=int,
+        default=6,
+        help="Max RRSP positions in the monthly review (default: 6).",
+    )
+    parser.add_argument(
+        "--monthly-rrsp-max-position-pct",
+        type=float,
+        default=0.30,
+        help="Max per-position fraction for RRSP monthly review (default: 0.30).",
+    )
     args = parser.parse_args(argv)
 
     # ── Build ticker list ──────────────────────────────────────────────────────
@@ -504,9 +741,36 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.warning("No qualifying options found with the current parameters.")
         return 0
 
+    raw_suggestions = suggestions.copy()
+
     # ── Strategy filter ────────────────────────────────────────────────────────
     if args.strategy != "all":
         suggestions = suggestions[suggestions["option_type"] == args.strategy]
+
+    # ── Optional risk controls / sizing ─────────────────────────────────────
+    use_risk_controls = any(
+        v is not None
+        for v in (
+            args.account_cash,
+            args.max_notional_per_trade,
+            args.max_total_notional,
+            args.max_trades_per_ticker,
+        )
+    )
+
+    if use_risk_controls:
+        suggestions = add_position_sizing_columns(
+            suggestions,
+            account_cash=args.account_cash,
+            max_notional_per_trade=args.max_notional_per_trade,
+        )
+        suggestions = filter_unaffordable_trades(suggestions)
+        if args.max_total_notional is not None:
+            suggestions = allocate_under_total_notional(
+                suggestions.sort_values("score", ascending=False).reset_index(drop=True),
+                max_total_notional=float(args.max_total_notional),
+                max_trades_per_ticker=args.max_trades_per_ticker,
+            )
 
     # ── Options portfolio allocation ───────────────────────────────────────────
     # Both options allocations are independent — run them in parallel.
@@ -548,7 +812,6 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     _print_tfsa_stock_allocation(tfsa_stock)
     _print_rrsp_allocation(rrsp)
-
     _print_suggestions(suggestions, top=args.top)
 
     # ── Optional CSV export ────────────────────────────────────────────────────
@@ -587,28 +850,30 @@ def main(argv: Optional[List[str]] = None) -> int:
             addr.strip() for addr in args.monthly_email.split(",") if addr.strip()
         ]
 
-        # $50,000 total portfolio: $25K TFSA (growth stocks) + $25K RRSP (stability).
-        # The monthly review focuses on stock allocations only — no short-term options.
-        _MONTHLY_TFSA_CAPITAL: float = 25_000.0
-        _MONTHLY_RRSP_CAPITAL: float = 25_000.0
+        tfsa_capital = float(args.monthly_tfsa_capital)
+        rrsp_capital = float(args.monthly_rrsp_capital)
 
-        logger.info("Computing monthly $50,000 TFSA + RRSP portfolio …")
+        logger.info(
+            "Computing monthly TFSA + RRSP portfolio (TFSA=%.0f, RRSP=%.0f) …",
+            tfsa_capital,
+            rrsp_capital,
+        )
         with ThreadPoolExecutor(max_workers=2) as executor:
             fut_m_tfsa_stock = executor.submit(
                 allocate_tfsa_stock_portfolio,
                 tfsa_stock_histories,
-                _MONTHLY_TFSA_CAPITAL,
-                5,
-                0.35,
-                0.40,
+                tfsa_capital,
+                int(args.monthly_tfsa_max_positions),
+                float(args.monthly_tfsa_max_position_pct),
+                float(args.monthly_tfsa_max_sector_pct),
                 market_ret,
             )
             fut_m_rrsp = executor.submit(
                 allocate_rrsp_portfolio,
                 rrsp_histories,
-                _MONTHLY_RRSP_CAPITAL,
-                6,
-                0.30,
+                rrsp_capital,
+                int(args.monthly_rrsp_max_positions),
+                float(args.monthly_rrsp_max_position_pct),
             )
             monthly_tfsa_stock = fut_m_tfsa_stock.result()
             monthly_rrsp = fut_m_rrsp.result()
@@ -616,8 +881,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         monthly_html = build_monthly_portfolio_email(
             tfsa_stock=monthly_tfsa_stock,
             rrsp=monthly_rrsp,
-            tfsa_capital=_MONTHLY_TFSA_CAPITAL,
-            rrsp_capital=_MONTHLY_RRSP_CAPITAL,
+            tfsa_capital=tfsa_capital,
+            rrsp_capital=rrsp_capital,
         )
         monthly_subject = (
             f"Monthly Portfolio Review — {date.today().strftime('%B %Y')}"
@@ -636,6 +901,37 @@ def main(argv: Optional[List[str]] = None) -> int:
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to send monthly portfolio email: %s", exc)
             return 1
+
+    if args.run_log:
+        try:
+            artifacts = {
+                "options_portfolio": _portfolio_allocation_to_df(portfolio),
+                "tfsa_options": _tfsa_allocation_to_df(tfsa_opts),
+                "tfsa_stock": _tfsa_stock_to_df(tfsa_stock),
+                "rrsp": _rrsp_to_df(rrsp),
+            }
+            meta_extra = {
+                "monthly": {
+                    "enabled": bool(args.monthly_email),
+                    "tfsa_capital": float(args.monthly_tfsa_capital),
+                    "rrsp_capital": float(args.monthly_rrsp_capital),
+                    "tfsa_max_positions": int(args.monthly_tfsa_max_positions),
+                    "tfsa_max_position_pct": float(args.monthly_tfsa_max_position_pct),
+                    "tfsa_max_sector_pct": float(args.monthly_tfsa_max_sector_pct),
+                    "rrsp_max_positions": int(args.monthly_rrsp_max_positions),
+                    "rrsp_max_position_pct": float(args.monthly_rrsp_max_position_pct),
+                }
+            }
+            _log_run(
+                raw_suggestions,
+                suggestions,
+                run_log_dir=args.run_log_dir,
+                args=args,
+                artifacts=artifacts,
+                meta_extra=meta_extra,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to write run log: %s", exc)
 
     return 0
 
