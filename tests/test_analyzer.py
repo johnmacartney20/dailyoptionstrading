@@ -3,6 +3,7 @@
 import math
 from datetime import date, timedelta
 
+import pandas as pd
 import pytest
 
 from scanner.analyzer import (
@@ -625,8 +626,7 @@ def test_enrich_options_premarket_gap_none():
     df = _make_simple_df()
     enriched = enrich_options(df, 100.0, "put", expiry, "AAPL", premarket_gap=None)
     assert "premarket_gap_pct" in enriched.columns
-    val = enriched["premarket_gap_pct"].iloc[0]
-    assert val is None or (isinstance(val, float) and math.isnan(val))
+    assert pd.isna(enriched["premarket_gap_pct"].iloc[0])
 
 
 def test_enrich_options_earnings_within_expiry_true():

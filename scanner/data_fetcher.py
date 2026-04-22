@@ -165,7 +165,7 @@ def get_earnings_date(ticker: str) -> Optional[date]:
             if "Earnings Date" not in cal.index:
                 return None
             raw = cal.loc["Earnings Date"]
-            dates = list(raw) if hasattr(raw, "__iter__") else [raw]
+            dates = list(raw) if hasattr(raw, "__iter__") and not isinstance(raw, str) else [raw]
         elif isinstance(cal, dict):
             dates = cal.get("Earnings Date") or []
         else:
@@ -175,7 +175,7 @@ def get_earnings_date(ticker: str) -> Optional[date]:
         for entry in dates:
             try:
                 if isinstance(entry, (datetime, pd.Timestamp)):
-                    d = entry.date() if hasattr(entry, "date") else entry
+                    d = entry.date()
                 else:
                     d = datetime.strptime(str(entry)[:10], "%Y-%m-%d").date()
                 if d >= today:

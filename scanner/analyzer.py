@@ -475,7 +475,7 @@ def enrich_options(
 
     # ── Pre-market gap (informational) ────────────────────────────────────────
     # Positive = stock opened higher today; negative = opened lower.
-    out["premarket_gap_pct"] = premarket_gap  # scalar → broadcast to all rows; None when unavailable
+    out["premarket_gap_pct"] = premarket_gap  # assigns scalar value to all rows; None when unavailable
 
     # ── Earnings-within-expiry flag ───────────────────────────────────────────
     # True when a confirmed earnings date falls on or before the option expiry.
