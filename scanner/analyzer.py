@@ -364,13 +364,26 @@ def enrich_options(
     option_type: str,
     expiry: str,
     ticker: str,
+    premarket_gap: Optional[float] = None,
+    earnings_date=None,
 ) -> pd.DataFrame:
     """Add computed columns to a raw options DataFrame.
 
     Added columns: ``ticker``, ``option_type``, ``expiry``, ``dte``,
     ``stock_price``, ``otm_pct``, ``annualized_return``,
     ``bid_ask_spread_pct``, ``risk_adjusted_return``, ``max_spread_loss``,
-    ``spread_structure``, ``pop``, ``score``.
+    ``spread_structure``, ``pop``, ``score``,
+    ``premarket_gap_pct``, ``earnings_within_expiry``.
+
+    Parameters
+    ----------
+    premarket_gap:
+        Today's open-vs-prior-close gap as a fraction (e.g. 0.03 = +3 %).
+        ``None`` when unavailable.
+    earnings_date:
+        Next confirmed earnings date (``datetime.date`` or ``None``).
+        When provided, ``earnings_within_expiry`` is ``True`` for any row
+        whose expiry falls on or after the earnings date.
     """
     if df.empty:
         return df.copy()
@@ -459,6 +472,22 @@ def enrich_options(
     else:
         out["tfsa_score"] = 0.0
         out["tfsa_spread"] = ""
+
+    # ── Pre-market gap (informational) ────────────────────────────────────────
+    # Positive = stock opened higher today; negative = opened lower.
+    out["premarket_gap_pct"] = premarket_gap  # assigns scalar value to all rows; None when unavailable
+
+    # ── Earnings-within-expiry flag ───────────────────────────────────────────
+    # True when a confirmed earnings date falls on or before the option expiry.
+    # Holding a short spread through earnings is a binary event risk.
+    if earnings_date is not None:
+        try:
+            expiry_dt = datetime.strptime(expiry, "%Y-%m-%d").date()
+            out["earnings_within_expiry"] = earnings_date <= expiry_dt
+        except (ValueError, TypeError):
+            out["earnings_within_expiry"] = False
+    else:
+        out["earnings_within_expiry"] = False
 
     return out
 

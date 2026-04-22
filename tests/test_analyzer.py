@@ -3,6 +3,7 @@
 import math
 from datetime import date, timedelta
 
+import pandas as pd
 import pytest
 
 from scanner.analyzer import (
@@ -593,4 +594,68 @@ def test_score_option_pop_one_unchanged():
     assert score_option(**kwargs, pop=None) == pytest.approx(
         score_option(**kwargs, pop=1.0)
     )
+
+
+# ── enrich_options: premarket_gap_pct and earnings_within_expiry ─────────────
+
+
+def _make_simple_df(strike=95.0, bid=1.5, ask=1.6, oi=1000):
+    import pandas as pd
+    return pd.DataFrame([{
+        "strike": strike, "bid": bid, "ask": ask,
+        "openInterest": oi, "volume": 50,
+        "impliedVolatility": 0.3, "inTheMoney": False,
+        "contractSymbol": "AAPL95P",
+    }])
+
+
+def test_enrich_options_premarket_gap_propagated():
+    """premarket_gap_pct column should reflect the value passed in."""
+    import pandas as pd
+    expiry = (date.today() + timedelta(days=30)).strftime("%Y-%m-%d")
+    df = _make_simple_df()
+    enriched = enrich_options(df, 100.0, "put", expiry, "AAPL", premarket_gap=0.025)
+    assert "premarket_gap_pct" in enriched.columns
+    assert enriched["premarket_gap_pct"].iloc[0] == pytest.approx(0.025)
+
+
+def test_enrich_options_premarket_gap_none():
+    """When no gap is provided, premarket_gap_pct should be None / NaN."""
+    import pandas as pd
+    expiry = (date.today() + timedelta(days=30)).strftime("%Y-%m-%d")
+    df = _make_simple_df()
+    enriched = enrich_options(df, 100.0, "put", expiry, "AAPL", premarket_gap=None)
+    assert "premarket_gap_pct" in enriched.columns
+    assert pd.isna(enriched["premarket_gap_pct"].iloc[0])
+
+
+def test_enrich_options_earnings_within_expiry_true():
+    """earnings_within_expiry should be True when earnings fall before expiry."""
+    import pandas as pd
+    expiry_date = date.today() + timedelta(days=30)
+    expiry = expiry_date.strftime("%Y-%m-%d")
+    earnings = date.today() + timedelta(days=15)   # inside the window
+    df = _make_simple_df()
+    enriched = enrich_options(df, 100.0, "put", expiry, "AAPL", earnings_date=earnings)
+    assert bool(enriched["earnings_within_expiry"].iloc[0]) is True
+
+
+def test_enrich_options_earnings_within_expiry_false_after():
+    """earnings_within_expiry should be False when earnings fall after expiry."""
+    import pandas as pd
+    expiry_date = date.today() + timedelta(days=30)
+    expiry = expiry_date.strftime("%Y-%m-%d")
+    earnings = date.today() + timedelta(days=45)   # after expiry
+    df = _make_simple_df()
+    enriched = enrich_options(df, 100.0, "put", expiry, "AAPL", earnings_date=earnings)
+    assert bool(enriched["earnings_within_expiry"].iloc[0]) is False
+
+
+def test_enrich_options_earnings_none_flag_false():
+    """When earnings_date is None, earnings_within_expiry should always be False."""
+    import pandas as pd
+    expiry = (date.today() + timedelta(days=30)).strftime("%Y-%m-%d")
+    df = _make_simple_df()
+    enriched = enrich_options(df, 100.0, "put", expiry, "AAPL", earnings_date=None)
+    assert bool(enriched["earnings_within_expiry"].iloc[0]) is False
 
