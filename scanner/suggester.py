@@ -30,6 +30,7 @@ OUTPUT_COLUMNS = [
     "volume",
     "impliedVolatility",
     "otm_pct",
+    "pop",
     "annualized_return",
     "bid_ask_spread_pct",
     "risk_adjusted_return",
@@ -69,6 +70,20 @@ def screen_options(
         return pd.DataFrame()
 
     params = SCREENING_PARAMS
+
+    # ── Data quality gate: detect stale / bad options chains ─────────────────
+    # When >80 % of bids in a chain are zero the feed is almost certainly
+    # stale or malformed.  Returning early avoids polluting the run with
+    # phantom candidates that survive subsequent filters on a single row.
+    zero_bid_ratio = (
+        options_df["bid"].fillna(0).eq(0).sum() / max(len(options_df), 1)
+    )
+    if zero_bid_ratio > 0.80:
+        logger.warning(
+            "Skipping %s %s %s — %.0f%% of bids are zero (stale/bad chain).",
+            ticker, option_type, expiry, zero_bid_ratio * 100,
+        )
+        return pd.DataFrame()
 
     # Enrich with computed metrics
     df = enrich_options(options_df, stock_price, option_type, expiry, ticker)

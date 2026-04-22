@@ -9,6 +9,7 @@ from scanner.analyzer import (
     calculate_annualized_return,
     calculate_dte,
     calculate_otm_pct,
+    calculate_pop,
     calculate_risk_adjusted_return,
     enrich_options,
     score_option,
@@ -245,7 +246,8 @@ def test_enrich_options_adds_columns():
     for col in (
         "ticker", "option_type", "expiry", "dte", "stock_price",
         "otm_pct", "annualized_return", "bid_ask_spread_pct",
-        "risk_adjusted_return", "max_spread_loss", "spread_structure", "score",
+        "risk_adjusted_return", "max_spread_loss", "spread_structure",
+        "pop", "score",
     ):
         assert col in enriched.columns
 
@@ -258,6 +260,8 @@ def test_enrich_options_adds_columns():
     assert enriched["risk_adjusted_return"].iloc[0] > 0
     assert enriched["max_spread_loss"].iloc[0] > 0
     assert enriched["spread_structure"].iloc[0] == "Sell 95P / Buy 90P"
+    # PoP for a 5 % OTM put at 30 % IV / 30 DTE should be between 0.5 and 0.85
+    assert 0.5 < enriched["pop"].iloc[0] < 0.85
     assert enriched["score"].iloc[0] > 0
 
 
@@ -504,4 +508,87 @@ def test_enrich_options_put_tfsa_columns_zero():
     assert "tfsa_spread" in enriched.columns
     assert enriched["tfsa_score"].iloc[0] == 0.0
     assert enriched["tfsa_spread"].iloc[0] == ""
+
+
+# ── calculate_pop ─────────────────────────────────────────────────────────────
+
+
+def test_calculate_pop_atm_put_near_half():
+    """ATM short-put PoP should be close to 0.5 (slightly below due to -0.5σ²T term)."""
+    pop = calculate_pop(100.0, 100.0, 0.30, 30, "put")
+    assert 0.40 <= pop <= 0.60
+
+
+def test_calculate_pop_deep_otm_put_high_pop():
+    """A 20 % OTM short put with moderate IV should have PoP > 0.95."""
+    pop = calculate_pop(80.0, 100.0, 0.25, 30, "put")
+    assert pop > 0.95
+
+
+def test_calculate_pop_near_atm_put_moderate_pop():
+    """A 3 % OTM short put should have a moderate PoP (0.55–0.80)."""
+    pop = calculate_pop(97.0, 100.0, 0.30, 30, "put")
+    assert 0.55 <= pop <= 0.80
+
+
+def test_calculate_pop_call_vs_put_roughly_symmetric():
+    """Symmetric OTM call and put (equal % from ATM) should have approximately equal PoP."""
+    pop_put = calculate_pop(97.0, 100.0, 0.30, 30, "put")
+    pop_call = calculate_pop(103.0, 100.0, 0.30, 30, "call")
+    assert abs(pop_put - pop_call) < 0.06
+
+
+def test_calculate_pop_zero_iv_returns_neutral():
+    """Zero IV is invalid; function should return the neutral sentinel 0.5."""
+    assert calculate_pop(95.0, 100.0, 0.0, 30, "put") == pytest.approx(0.5)
+
+
+def test_calculate_pop_zero_dte_returns_neutral():
+    """Zero DTE is invalid; function should return the neutral sentinel 0.5."""
+    assert calculate_pop(95.0, 100.0, 0.30, 0, "put") == pytest.approx(0.5)
+
+
+def test_calculate_pop_range():
+    """PoP should always be in (0, 1] for typical option parameters."""
+    for iv in (0.15, 0.30, 0.60):
+        for dte in (7, 30, 60):
+            for strike_pct in (0.90, 0.95, 1.00, 1.05, 1.10):
+                pop = calculate_pop(100.0 * strike_pct, 100.0, iv, dte, "put")
+                assert 0.0 < pop <= 1.0
+
+
+# ── score_option with PoP ────────────────────────────────────────────────────
+
+
+def test_score_option_higher_pop_wins():
+    """Same OTM% / same other params but higher PoP → higher score."""
+    s_high_pop = score_option(
+        bid=1.0, ask=1.1, strike=95.0, stock_price=100.0,
+        open_interest=1000, implied_volatility=0.30, otm_pct=0.05, pop=0.90,
+    )
+    s_low_pop = score_option(
+        bid=1.0, ask=1.1, strike=95.0, stock_price=100.0,
+        open_interest=1000, implied_volatility=0.30, otm_pct=0.05, pop=0.55,
+    )
+    assert s_high_pop > s_low_pop
+
+
+def test_score_option_pop_none_unchanged():
+    """Omitting pop (default None) must leave scores identical to the pre-PoP behaviour."""
+    kwargs = dict(
+        bid=1.0, ask=1.1, strike=95.0, stock_price=100.0,
+        open_interest=1000, implied_volatility=0.30, otm_pct=0.05,
+    )
+    assert score_option(**kwargs) == score_option(**kwargs, pop=None)
+
+
+def test_score_option_pop_one_unchanged():
+    """pop=1.0 (certainty) must leave the distance score unchanged."""
+    kwargs = dict(
+        bid=1.0, ask=1.1, strike=95.0, stock_price=100.0,
+        open_interest=1000, implied_volatility=0.30, otm_pct=0.05,
+    )
+    assert score_option(**kwargs, pop=None) == pytest.approx(
+        score_option(**kwargs, pop=1.0)
+    )
 

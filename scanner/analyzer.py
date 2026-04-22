@@ -97,6 +97,46 @@ def calculate_risk_adjusted_return(bid: float, strike: float) -> float:
     return bid / max_loss
 
 
+def calculate_pop(
+    strike: float,
+    stock_price: float,
+    implied_volatility: float,
+    dte: int,
+    option_type: str,
+) -> float:
+    """Return the probability of profit (PoP) for a *short* option.
+
+    Uses the Black-Scholes d₂ term to estimate the probability that the option
+    expires worthless (i.e. out-of-the-money for the seller).
+
+    * **Short put** : PoP = N(d₂)   — probability stock stays above strike.
+    * **Short call** : PoP = N(−d₂)  — probability stock stays below strike.
+
+    The normal CDF is computed via :func:`math.erf` (no external dependency).
+
+    Returns ``0.5`` (neutral) when any input is invalid (zero IV, zero DTE,
+    non-positive prices), so downstream scoring degrades gracefully.
+    """
+    if implied_volatility <= 0 or dte <= 0 or stock_price <= 0 or strike <= 0:
+        return 0.5
+
+    t = dte / 365.0
+    try:
+        d2 = (
+            math.log(stock_price / strike) - 0.5 * implied_volatility ** 2 * t
+        ) / (implied_volatility * math.sqrt(t))
+    except (ValueError, ZeroDivisionError):
+        return 0.5
+
+    def _norm_cdf(x: float) -> float:
+        """Standard normal CDF via the error function (no scipy required)."""
+        return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+    if option_type == "put":
+        return _norm_cdf(d2)
+    return _norm_cdf(-d2)
+
+
 def suggest_spread_structure(strike: float, option_type: str) -> str:
     """Return a human-readable spread structure string for a defined-risk trade.
 
@@ -213,6 +253,7 @@ def score_option(
     open_interest: int,
     implied_volatility: float,
     otm_pct: float,
+    pop: Optional[float] = None,
 ) -> float:
     """Return a composite score for ranking options (higher is better).
 
@@ -224,7 +265,9 @@ def score_option(
     1. **Distance score** (0–40 pts): rewards strikes further OTM.
        ATM or within 2 % OTM receive no credit.  The reward ramp is
        intentionally shallow in the 2–5 % zone and steepens past 5 %,
-       requiring 20 %+ OTM to reach the ceiling.
+       requiring 20 %+ OTM to reach the ceiling.  When *pop* is supplied,
+       the distance score is scaled by it — high-probability strikes earn
+       full credit while low-probability strikes are proportionally penalised.
     2. **Liquidity score** (up to 25 pts, can be slightly negative for very
        wide markets): log-scaled open-interest bonus — requires OI ≥ ~8 000
        to hit the 20-pt ceiling (vs. OI ~316 previously) — plus a bid-ask
@@ -239,6 +282,15 @@ def score_option(
        standard defined-risk spread.  Low-credit trades (ratio < 0.15)
        receive a steeper penalty than before; the cap is only reached at a
        ratio ≥ ~0.55.
+
+    Parameters
+    ----------
+    pop:
+        Optional probability of profit for the seller (0–1), computed via
+        :func:`calculate_pop`.  When provided, the distance score is multiplied
+        by *pop* so that equal OTM strikes on high-volatility underlyings
+        (lower PoP) score below the same strike on lower-volatility stocks.
+        When ``None``, the distance score is not adjusted (backward compatible).
     """
     if bid <= 0 or strike <= 0:
         return 0.0
@@ -258,6 +310,12 @@ def score_option(
         distance_score = 33.0 + 7.0 * (otm_pct - 0.10) / 0.10
     else:
         distance_score = 40.0
+
+    # Scale distance score by PoP when available: a 10 % OTM strike on a
+    # high-vol stock (PoP ≈ 0.60) earns less distance credit than the same
+    # strike on a low-vol stock (PoP ≈ 0.90).
+    if pop is not None and 0.0 < pop <= 1.0:
+        distance_score *= pop
 
     # ── 2. Liquidity score (up to 25 pts) ────────────────────────────────────
     # OI bar raised: OI < ~32 → 0 pts; OI ~8 000 → 20 pts (old ceiling at 316).
@@ -312,7 +370,7 @@ def enrich_options(
     Added columns: ``ticker``, ``option_type``, ``expiry``, ``dte``,
     ``stock_price``, ``otm_pct``, ``annualized_return``,
     ``bid_ask_spread_pct``, ``risk_adjusted_return``, ``max_spread_loss``,
-    ``spread_structure``, ``score``.
+    ``spread_structure``, ``pop``, ``score``.
     """
     if df.empty:
         return df.copy()
@@ -358,6 +416,18 @@ def enrich_options(
         axis=1,
     )
 
+    # Probability of profit (Black-Scholes d₂ estimate) for the seller
+    out["pop"] = out.apply(
+        lambda row: calculate_pop(
+            row["strike"],
+            stock_price,
+            float(row.get("impliedVolatility", 0.0) or 0.0),
+            dte,
+            option_type,
+        ),
+        axis=1,
+    )
+
     out["score"] = out.apply(
         lambda row: score_option(
             row["bid"],
@@ -367,6 +437,7 @@ def enrich_options(
             _safe_int(row.get("openInterest"), 0),
             float(row.get("impliedVolatility", 0.0) or 0.0),
             row["otm_pct"],
+            row["pop"],
         ),
         axis=1,
     )
