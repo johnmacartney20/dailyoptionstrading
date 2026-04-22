@@ -214,3 +214,54 @@ def test_screen_options_allows_mostly_valid_bids():
     )
     assert not result.empty
 
+
+# ── Earnings filter ───────────────────────────────────────────────────────────
+
+
+def test_screen_options_rejects_earnings_within_expiry():
+    """Options expiring on or after the next earnings date should be filtered out."""
+    from datetime import date, timedelta
+    df = _make_options_df({"strike": 95.0, "bid": 1.5, "openInterest": 1000})
+    # Earnings 15 days from now; expiry 30 days from now → earnings inside window
+    earnings = date.today() + timedelta(days=15)
+    result = screen_options(
+        df, stock_price=100.0, option_type="put", expiry=_expiry(30),
+        ticker="AAPL", earnings_date=earnings,
+    )
+    assert result.empty
+
+
+def test_screen_options_keeps_expiry_before_earnings():
+    """Options expiring before the earnings date should pass the filter."""
+    from datetime import date, timedelta
+    df = _make_options_df({"strike": 95.0, "bid": 1.5, "openInterest": 1000})
+    # Earnings 45 days from now; expiry 30 days from now → expiry before earnings
+    earnings = date.today() + timedelta(days=45)
+    result = screen_options(
+        df, stock_price=100.0, option_type="put", expiry=_expiry(30),
+        ticker="AAPL", earnings_date=earnings,
+    )
+    assert not result.empty
+
+
+def test_screen_options_no_earnings_date_unaffected():
+    """When earnings_date is None, no earnings filtering should occur."""
+    df = _make_options_df({"strike": 95.0, "bid": 1.5, "openInterest": 1000})
+    result = screen_options(
+        df, stock_price=100.0, option_type="put", expiry=_expiry(30),
+        ticker="AAPL", earnings_date=None,
+    )
+    assert not result.empty
+
+
+def test_screen_options_new_columns_present():
+    """Screened results should include premarket_gap_pct and earnings_within_expiry."""
+    df = _make_options_df({"strike": 95.0, "bid": 1.5, "openInterest": 1000})
+    result = screen_options(
+        df, stock_price=100.0, option_type="put", expiry=_expiry(30),
+        ticker="AAPL", premarket_gap=0.01, earnings_date=None,
+    )
+    assert not result.empty
+    assert "premarket_gap_pct" in result.columns
+    assert "earnings_within_expiry" in result.columns
+

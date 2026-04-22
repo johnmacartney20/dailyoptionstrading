@@ -5,7 +5,8 @@ produces a ranked list of trade suggestions.
 """
 
 import logging
-from typing import List
+from datetime import date
+from typing import List, Optional
 
 import pandas as pd
 
@@ -39,6 +40,8 @@ OUTPUT_COLUMNS = [
     "score",
     "tfsa_score",
     "tfsa_spread",
+    "premarket_gap_pct",
+    "earnings_within_expiry",
     "inTheMoney",
     "contractSymbol",
 ]
@@ -50,6 +53,8 @@ def screen_options(
     option_type: str,
     expiry: str,
     ticker: str,
+    premarket_gap: Optional[float] = None,
+    earnings_date: Optional[date] = None,
 ) -> pd.DataFrame:
     """Enrich and filter *options_df* returning only qualifying candidates.
 
@@ -63,6 +68,23 @@ def screen_options(
       Trades within 3 % of the stock price are excluded as too close to ATM.
     * Annualised return ≥ ``min_annualized_return_pct`` (floor only).
     * Max spread loss ≤ ``max_spread_loss`` (small-account compatibility).
+    * **Earnings filter**: options whose expiry falls on or after the next
+      confirmed earnings date are excluded.  Holding a short spread through
+      a binary earnings event exposes the position to undefined IV crush or
+      gap risk that the scoring model does not account for.
+
+    The ``premarket_gap_pct`` column is informational only (not a filter).
+    A pre-market gap of ≥ 3 % (up or down) is a regime-change signal —
+    the column is preserved so the end user can review it before trading.
+
+    Parameters
+    ----------
+    premarket_gap:
+        Today's open-vs-prior-close gap as a fraction.  ``None`` when
+        unavailable.
+    earnings_date:
+        Next confirmed earnings date for the underlying.  Options expiring
+        on or after this date are removed from the results.
 
     Returns an empty :class:`~pandas.DataFrame` when no options qualify.
     """
@@ -86,7 +108,11 @@ def screen_options(
         return pd.DataFrame()
 
     # Enrich with computed metrics
-    df = enrich_options(options_df, stock_price, option_type, expiry, ticker)
+    df = enrich_options(
+        options_df, stock_price, option_type, expiry, ticker,
+        premarket_gap=premarket_gap,
+        earnings_date=earnings_date,
+    )
 
     # ── DTE filter ────────────────────────────────────────────────────────────
     df = df[
@@ -115,6 +141,20 @@ def screen_options(
 
     # ── Small-account: max spread loss filter ─────────────────────────────────
     df = df[df["max_spread_loss"] <= params["max_spread_loss"]]
+
+    # ── Earnings filter: exclude options expiring through earnings ─────────────
+    # Short spreads should not be held through a binary earnings event.
+    # When an earnings date is known, any expiry on or after that date is dropped.
+    if "earnings_within_expiry" in df.columns:
+        before = len(df)
+        df = df[~df["earnings_within_expiry"]]
+        removed = before - len(df)
+        if removed > 0:
+            logger.info(
+                "Earnings filter: removed %d %s %s option(s) for %s "
+                "(earnings on or before expiry %s).",
+                removed, option_type, expiry, ticker, earnings_date,
+            )
 
     if df.empty:
         return pd.DataFrame()

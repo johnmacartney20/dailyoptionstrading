@@ -6,6 +6,7 @@ a free public data source accessible via the ``yfinance`` library.
 
 import logging
 import time
+from datetime import date, datetime
 from typing import List, Optional
 
 import pandas as pd
@@ -141,6 +142,75 @@ def get_market_return(benchmark: str = "SPY", period_days: int = 20) -> float:
         return 0.0
     close = hist["Close"].astype(float)
     return float(close.iloc[-1]) / float(close.iloc[-(period_days + 1)]) - 1.0
+
+
+def get_earnings_date(ticker: str) -> Optional[date]:
+    """Return the next confirmed earnings date for *ticker*, or ``None``.
+
+    Uses ``yf.Ticker.calendar`` which returns a dict with an
+    ``"Earnings Date"`` key whose value is a list of ``datetime``-like
+    objects.  Only the first (soonest) future entry is returned.
+
+    Returns ``None`` when the calendar is unavailable, empty, or the date
+    cannot be parsed, so callers receive a safe fallback without crashing.
+    """
+    try:
+        t = yf.Ticker(ticker)
+        cal = t.calendar
+        if cal is None:
+            return None
+
+        # yfinance may return a dict or a DataFrame depending on version.
+        if isinstance(cal, pd.DataFrame):
+            if "Earnings Date" not in cal.index:
+                return None
+            raw = cal.loc["Earnings Date"]
+            dates = list(raw) if hasattr(raw, "__iter__") else [raw]
+        elif isinstance(cal, dict):
+            dates = cal.get("Earnings Date") or []
+        else:
+            return None
+
+        today = date.today()
+        for entry in dates:
+            try:
+                if isinstance(entry, (datetime, pd.Timestamp)):
+                    d = entry.date() if hasattr(entry, "date") else entry
+                else:
+                    d = datetime.strptime(str(entry)[:10], "%Y-%m-%d").date()
+                if d >= today:
+                    return d
+            except (ValueError, TypeError):
+                continue
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not fetch earnings date for %s: %s", ticker, exc)
+        return None
+
+
+def get_premarket_gap(ticker: str) -> Optional[float]:
+    """Return the pre-market / overnight gap as a fraction of the prior close.
+
+    Computed as ``(today_open - prior_close) / prior_close`` using the last
+    two trading sessions from a 5-day daily history download.  A positive
+    value means the stock opened higher; negative means it opened lower.
+
+    Returns ``None`` when the data is unavailable (e.g. before market open,
+    weekend, or a failed fetch), so callers can treat missing as neutral.
+    """
+    try:
+        t = yf.Ticker(ticker)
+        hist = t.history(period="5d", interval="1d")
+        if hist is None or len(hist) < 2:
+            return None
+        prior_close = float(hist["Close"].iloc[-2])
+        today_open = float(hist["Open"].iloc[-1])
+        if prior_close <= 0:
+            return None
+        return (today_open - prior_close) / prior_close
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not compute pre-market gap for %s: %s", ticker, exc)
+        return None
 
 
 def get_options_chain(

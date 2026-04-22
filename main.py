@@ -45,9 +45,11 @@ import pandas as pd
 
 from scanner.config import NASDAQ_TICKERS, RRSP_TICKERS, SCREENING_PARAMS, TSX_TICKERS
 from scanner.data_fetcher import (
+    get_earnings_date,
     get_expiration_dates,
     get_market_return,
     get_options_chain,
+    get_premarket_gap,
     get_price_history,
     get_stock_price,
 )
@@ -239,6 +241,14 @@ def scan_ticker(ticker: str) -> List[pd.DataFrame]:
         logger.debug("Skipping %s – no options listed.", ticker)
         return results
 
+    # Fetch per-ticker signals once and pass through to every expiry/type.
+    earnings_date = get_earnings_date(ticker)
+    premarket_gap = get_premarket_gap(ticker)
+    if earnings_date is not None:
+        logger.debug("%s next earnings: %s", ticker, earnings_date)
+    if premarket_gap is not None:
+        logger.debug("%s pre-market gap: %+.1f%%", ticker, premarket_gap * 100)
+
     for expiry in expiries:
         chain = get_options_chain(ticker, expiry)
         if chain is None:
@@ -246,7 +256,11 @@ def scan_ticker(ticker: str) -> List[pd.DataFrame]:
         calls_df, puts_df = chain
 
         for opt_type, opt_df in (("call", calls_df), ("put", puts_df)):
-            screened = screen_options(opt_df, price, opt_type, expiry, ticker)
+            screened = screen_options(
+                opt_df, price, opt_type, expiry, ticker,
+                premarket_gap=premarket_gap,
+                earnings_date=earnings_date,
+            )
             if not screened.empty:
                 results.append(screened)
 
