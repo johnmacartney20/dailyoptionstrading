@@ -739,7 +739,6 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if suggestions.empty:
         logger.warning("No qualifying options found with the current parameters.")
-        return 0
 
     raw_suggestions = suggestions.copy()
 

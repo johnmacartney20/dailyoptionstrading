@@ -3,11 +3,12 @@ name: Daily Options Scan
 on:
   # Runs at 13:30 UTC on weekdays = 10:30 AM Atlantic Time (ADT, UTC-3)
   # Adjust the cron expression if you want a different time:
+  #   "0  13 * * 1-5"  = 10:00 AM ADT (UTC-3)
   #   "45 13 * * 1-5"  = 10:45 AM ADT (UTC-3)
   #   "30 14 * * 1-5"  = 11:30 AM ADT (UTC-3)
   #   "0  21 * * 1-5"  = 6:00 PM ADT (after-hours)
   schedule:
-    - cron: "0 13 * * 1-5"
+    - cron: "30 13 * * 1-5"
 
   # Also allows triggering manually from the GitHub Actions tab
   workflow_dispatch:
