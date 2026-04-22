@@ -260,8 +260,10 @@ def test_enrich_options_adds_columns():
     assert enriched["risk_adjusted_return"].iloc[0] > 0
     assert enriched["max_spread_loss"].iloc[0] > 0
     assert enriched["spread_structure"].iloc[0] == "Sell 95P / Buy 90P"
-    # PoP for a 5 % OTM put at 30 % IV / 30 DTE should be between 0.5 and 0.85
-    assert 0.5 < enriched["pop"].iloc[0] < 0.85
+    # PoP for a 5 % OTM put at 30 % IV / 30 DTE:
+    # d2 = (ln(100/95) - 0.5*0.09*(30/365)) / (0.30*sqrt(30/365)) ≈ 0.31
+    # N(0.31) ≈ 0.622 — should be comfortably between 0.55 and 0.75
+    assert 0.55 < enriched["pop"].iloc[0] < 0.75
     assert enriched["score"].iloc[0] > 0
 
 
