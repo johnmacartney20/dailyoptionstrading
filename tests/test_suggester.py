@@ -188,3 +188,29 @@ def test_generate_suggestions_output_columns():
                 "risk_adjusted_return", "spread_structure"):
         assert col in suggestions.columns
 
+
+def test_screen_options_rejects_mostly_zero_bid_chain():
+    """A chain where > 80 % of bids are zero signals a stale/bad data feed."""
+    zero_row = {"bid": 0.0, "openInterest": 1000}
+    valid_row = {"bid": 1.5, "openInterest": 1000}
+    # 9 zero-bid rows, 1 valid row → ratio = 0.9 > 0.8
+    rows = [zero_row] * 9 + [valid_row]
+    df = _make_options_df(*rows)
+    result = screen_options(
+        df, stock_price=100.0, option_type="put", expiry=_expiry(30), ticker="AAPL"
+    )
+    assert result.empty
+
+
+def test_screen_options_allows_mostly_valid_bids():
+    """A chain where most bids are valid should not be rejected by the quality gate."""
+    valid_row = {"bid": 1.5, "openInterest": 1000}
+    zero_row = {"bid": 0.0, "openInterest": 1000}
+    # 8 valid rows, 2 zero-bid rows → ratio = 0.2 ≤ 0.8
+    rows = [valid_row] * 8 + [zero_row] * 2
+    df = _make_options_df(*rows)
+    result = screen_options(
+        df, stock_price=100.0, option_type="put", expiry=_expiry(30), ticker="AAPL"
+    )
+    assert not result.empty
+
