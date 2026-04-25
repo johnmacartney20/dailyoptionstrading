@@ -341,9 +341,9 @@ def _rrsp_to_html(rrsp: RrspPortfolio) -> str:
     return html
 
 
-# ── Monthly portfolio email ───────────────────────────────────────────────────
+# ── Weekly portfolio email ────────────────────────────────────────────────────
 
-_HTML_MONTHLY_HEAD = """<!DOCTYPE html>
+_HTML_WEEKLY_HEAD = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -379,7 +379,7 @@ _HTML_MONTHLY_HEAD = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h1>📊 Monthly Portfolio Review — {month_year}</h1>
+<h1>📊 Weekly Portfolio Review — {week_ending}</h1>
 <p class="meta">
   TFSA (Growth): <strong>${tfsa_capital:,.0f}</strong>
   &nbsp;|&nbsp; RRSP (Stability): <strong>${rrsp_capital:,.0f}</strong>
@@ -388,43 +388,43 @@ _HTML_MONTHLY_HEAD = """<!DOCTYPE html>
 """
 
 
-def _estimate_monthly_return_growth(score: float) -> float:
-    """Estimate a simulated monthly % return for a TFSA growth stock from its composite score.
+def _estimate_weekly_return_growth(score: float) -> float:
+    """Estimate a simulated weekly % return for a TFSA growth stock from its composite score.
 
-    Mapping (linear interpolation):
-    * score ≤ 30  → −2.0 %
-    * score = 60  →  3.0 %
-    * score = 80  →  6.5 %
-    * score = 100 → 10.0 %
+    Weekly values are approximated from monthly estimates divided by 4.33:
+    * score ≤ 30  → −0.46 %
+    * score = 60  →  0.69 %
+    * score = 80  →  1.50 %
+    * score = 100 →  2.31 %
     """
     if score <= 30:
-        return -2.0
+        return -0.46
     if score <= 60:
-        return -2.0 + (score - 30) / 30.0 * 5.0
+        return -0.46 + (score - 30) / 30.0 * 1.15
     if score <= 80:
-        return 3.0 + (score - 60) / 20.0 * 3.5
-    return 6.5 + (score - 80) / 20.0 * 3.5
+        return 0.69 + (score - 60) / 20.0 * 0.81
+    return 1.50 + (score - 80) / 20.0 * 0.81
 
 
-def _estimate_monthly_return_stability(score: float) -> float:
-    """Estimate a simulated monthly % return for an RRSP stability holding from its composite score.
+def _estimate_weekly_return_stability(score: float) -> float:
+    """Estimate a simulated weekly % return for an RRSP stability holding from its composite score.
 
-    Mapping:
-    * score ≤ 30  → −1.0 %
-    * score = 60  →  1.5 %
-    * score = 80  →  3.0 %
-    * score = 100 →  5.0 %
+    Weekly values are approximated from monthly estimates divided by 4.33:
+    * score ≤ 30  → −0.23 %
+    * score = 60  →  0.35 %
+    * score = 80  →  0.69 %
+    * score = 100 →  1.15 %
     """
     if score <= 30:
-        return -1.0
+        return -0.23
     if score <= 60:
-        return -1.0 + (score - 30) / 30.0 * 2.5
+        return -0.23 + (score - 30) / 30.0 * 0.58
     if score <= 80:
-        return 1.5 + (score - 60) / 20.0 * 1.5
-    return 3.0 + (score - 80) / 20.0 * 2.0
+        return 0.35 + (score - 60) / 20.0 * 0.34
+    return 0.69 + (score - 80) / 20.0 * 0.46
 
 
-def _monthly_perf_section_html(
+def _weekly_perf_section_html(
     tfsa_stock: "TfsaStockPortfolio",
     rrsp: "RrspPortfolio",
     tfsa_capital: float,
@@ -442,8 +442,8 @@ def _monthly_perf_section_html(
     )
 
     for label, portfolio_obj, capital, estimator, box_class in [
-        ("TFSA (Growth)", tfsa_stock, tfsa_capital, _estimate_monthly_return_growth, "tfsa"),
-        ("RRSP (Stability)", rrsp, rrsp_capital, _estimate_monthly_return_stability, "rrsp"),
+        ("TFSA (Growth)", tfsa_stock, tfsa_capital, _estimate_weekly_return_growth, "tfsa"),
+        ("RRSP (Stability)", rrsp, rrsp_capital, _estimate_weekly_return_stability, "rrsp"),
     ]:
         positions = portfolio_obj.selected  # type: ignore[union-attr]
         if not positions:
@@ -480,7 +480,7 @@ def _monthly_perf_section_html(
             "</tr></thead><tbody>"
             f"<tr><td>Starting Value</td><td><strong>${capital:,.0f}</strong></td></tr>"
             f"<tr><td>Estimated Ending Value</td><td><strong>${ending_value:,.0f}</strong></td></tr>"
-            f"<tr><td>Estimated Monthly Return</td><td><strong>{weighted_return:+.1f}%</strong> (${dollar_gain:+,.0f})</td></tr>"
+            f"<tr><td>Estimated Weekly Return</td><td><strong>{weighted_return:+.2f}%</strong> (${dollar_gain:+,.0f})</td></tr>"
         )
         strong_str = ", ".join(
             f"{p.ticker} ({ret:+.1f}%, {p.sector})" for p, ret in strongest
@@ -498,7 +498,7 @@ def _monthly_perf_section_html(
     return html
 
 
-def _monthly_insights_section_html(
+def _weekly_insights_section_html(
     tfsa_stock: "TfsaStockPortfolio",
     rrsp: "RrspPortfolio",
 ) -> str:
@@ -555,7 +555,7 @@ def _monthly_insights_section_html(
             "weaker momentum — consider tighter position sizing or exit on breakdown.</li>"
         )
     if not high_score and not low_score:
-        html += "<li>All positions fall in the moderate range — maintain current sizing and review again next month.</li>"
+        html += "<li>All positions fall in the moderate range — maintain current sizing and review again next week.</li>"
     html += (
         "<li>Sector concentration is capped at &lt;50% per account to limit "
         "correlated drawdown risk across both TFSA and RRSP.</li>"
@@ -566,7 +566,7 @@ def _monthly_insights_section_html(
     return html
 
 
-def _monthly_rebalance_section_html(
+def _weekly_rebalance_section_html(
     tfsa_stock: "TfsaStockPortfolio",
     rrsp: "RrspPortfolio",
 ) -> str:
@@ -599,7 +599,7 @@ def _monthly_rebalance_section_html(
             "Exit if price breaks the 20-day moving average.</p>"
         )
     else:
-        html += "<p>No qualifying growth positions identified this month.</p>"
+        html += "<p>No qualifying growth positions identified this week.</p>"
     html += "</div>"
 
     # RRSP rebalance
@@ -627,22 +627,22 @@ def _monthly_rebalance_section_html(
             "alternative emerges. Prioritise income and capital preservation.</p>"
         )
     else:
-        html += "<p>No qualifying stability positions identified this month.</p>"
+        html += "<p>No qualifying stability positions identified this week.</p>"
     html += "</div>"
 
     html += "</div>"
     return html
 
 
-def _monthly_allocation_section_html(
+def _weekly_allocation_section_html(
     tfsa_stock: "TfsaStockPortfolio",
     rrsp: "RrspPortfolio",
     tfsa_capital: float,
     rrsp_capital: float,
 ) -> str:
-    """Return HTML for Section 4 — Suggested Allocation for Next Month (two tables)."""
+    """Return HTML for Section 4 — Suggested Allocation for Next Week (two tables)."""
     html = '<div class="section-box">'
-    html += "<h2>💰 Section 4 — Suggested Allocation for Next Month</h2>"
+    html += "<h2>💰 Section 4 — Suggested Allocation for Next Week</h2>"
 
     # TFSA table
     html += '<div class="tfsa-box">'
@@ -706,23 +706,23 @@ def _monthly_allocation_section_html(
     return html
 
 
-def build_monthly_portfolio_email(
+def build_weekly_portfolio_email(
     tfsa_stock: TfsaStockPortfolio,
     rrsp: RrspPortfolio,
     tfsa_capital: float = 25_000.0,
     rrsp_capital: float = 25_000.0,
 ) -> str:
-    """Return a complete HTML email for the monthly TFSA + RRSP portfolio review.
+    """Return a complete HTML email for the weekly TFSA + RRSP portfolio review.
 
     The email is structured into four sections:
 
-    1. **Performance Summary** — simulated monthly performance estimates for
+    1. **Performance Summary** — simulated weekly performance estimates for
        each account based on composite scoring.
     2. **Insights and Learnings** — sector patterns, winning vs losing positions,
        volatility and correlation commentary.
     3. **Portfolio Rebalance Strategy** — recommended adjustments and conviction
        narrative for TFSA (growth) and RRSP (stability) separately.
-    4. **Suggested Allocation for Next Month** — two tables (TFSA and RRSP) with
+    4. **Suggested Allocation for Next Week** — two tables (TFSA and RRSP) with
        ticker, sector, dollar allocation, portfolio %, and reasoning.
 
     Parameters
@@ -737,20 +737,20 @@ def build_monthly_portfolio_email(
         Total RRSP capital (default $25,000).
     """
     today = date.today()
-    month_year = today.strftime("%B %Y")
+    week_ending = today.strftime("%B %d, %Y")
     total_capital = tfsa_capital + rrsp_capital
 
-    html = _HTML_MONTHLY_HEAD.format(
-        month_year=month_year,
+    html = _HTML_WEEKLY_HEAD.format(
+        week_ending=week_ending,
         total_capital=total_capital,
         tfsa_capital=tfsa_capital,
         rrsp_capital=rrsp_capital,
     )
 
-    html += _monthly_perf_section_html(tfsa_stock, rrsp, tfsa_capital, rrsp_capital)
-    html += _monthly_insights_section_html(tfsa_stock, rrsp)
-    html += _monthly_rebalance_section_html(tfsa_stock, rrsp)
-    html += _monthly_allocation_section_html(tfsa_stock, rrsp, tfsa_capital, rrsp_capital)
+    html += _weekly_perf_section_html(tfsa_stock, rrsp, tfsa_capital, rrsp_capital)
+    html += _weekly_insights_section_html(tfsa_stock, rrsp)
+    html += _weekly_rebalance_section_html(tfsa_stock, rrsp)
+    html += _weekly_allocation_section_html(tfsa_stock, rrsp, tfsa_capital, rrsp_capital)
 
     html += _HTML_FOOT
     return html

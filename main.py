@@ -26,8 +26,8 @@ Usage examples
   python main.py --email you@example.com --smtp-host smtp.gmail.com \\
                  --smtp-user sender@gmail.com --smtp-password "app-password"
 
-  # Also send the monthly $50,000 TFSA + RRSP portfolio review email
-  python main.py --email you@example.com --monthly-email you@example.com
+  # Also send the weekly $50,000 TFSA + RRSP portfolio review email
+  python main.py --email you@example.com --weekly-email you@example.com
 """
 
 import argparse
@@ -53,7 +53,7 @@ from scanner.data_fetcher import (
     get_price_history,
     get_stock_price,
 )
-from scanner.emailer import build_html_email, build_monthly_portfolio_email, send_email
+from scanner.emailer import build_html_email, build_weekly_portfolio_email, send_email
 from scanner.portfolio_allocator import (
     PortfolioAllocation,
     RrspPortfolio,
@@ -672,14 +672,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="SMTP password or App Password (env: SMTP_PASSWORD).",
     )
     parser.add_argument(
-        "--monthly-email",
+        "--weekly-email",
         metavar="ADDRESS",
         default=None,
         help=(
-            "Send a separate monthly $50,000 TFSA + RRSP portfolio review email "
+            "Send a separate weekly $50,000 TFSA + RRSP portfolio review email "
             "to this address (comma-separated for multiple recipients). "
             "Uses the same SMTP credentials as --email. "
-            "Intended to be triggered once per month."
+            "Intended to be triggered every Friday after North American markets close."
         ),
     )
 
@@ -687,43 +687,43 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--monthly-tfsa-capital",
         type=float,
         default=25_000.0,
-        help="TFSA capital used in the monthly review email (default: 25000).",
+        help="TFSA capital used in the weekly review email (default: 25000).",
     )
     parser.add_argument(
         "--monthly-rrsp-capital",
         type=float,
         default=25_000.0,
-        help="RRSP capital used in the monthly review email (default: 25000).",
+        help="RRSP capital used in the weekly review email (default: 25000).",
     )
     parser.add_argument(
         "--monthly-tfsa-max-positions",
         type=int,
         default=5,
-        help="Max TFSA stock positions in the monthly review (default: 5).",
+        help="Max TFSA stock positions in the weekly review (default: 5).",
     )
     parser.add_argument(
         "--monthly-tfsa-max-position-pct",
         type=float,
         default=0.35,
-        help="Max per-position fraction for TFSA monthly review (default: 0.35).",
+        help="Max per-position fraction for TFSA weekly review (default: 0.35).",
     )
     parser.add_argument(
         "--monthly-tfsa-max-sector-pct",
         type=float,
         default=0.40,
-        help="Max sector fraction for TFSA monthly review (default: 0.40).",
+        help="Max sector fraction for TFSA weekly review (default: 0.40).",
     )
     parser.add_argument(
         "--monthly-rrsp-max-positions",
         type=int,
         default=6,
-        help="Max RRSP positions in the monthly review (default: 6).",
+        help="Max RRSP positions in the weekly review (default: 6).",
     )
     parser.add_argument(
         "--monthly-rrsp-max-position-pct",
         type=float,
         default=0.30,
-        help="Max per-position fraction for RRSP monthly review (default: 0.30).",
+        help="Max per-position fraction for RRSP weekly review (default: 0.30).",
     )
     args = parser.parse_args(argv)
 
@@ -857,17 +857,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             logger.error("Failed to send email: %s", exc)
             return 1
 
-    # ── Optional monthly portfolio email ──────────────────────────────────────
-    if args.monthly_email:
-        monthly_recipients = [
-            addr.strip() for addr in args.monthly_email.split(",") if addr.strip()
+    # ── Optional weekly portfolio email ───────────────────────────────────────
+    if args.weekly_email:
+        weekly_recipients = [
+            addr.strip() for addr in args.weekly_email.split(",") if addr.strip()
         ]
 
         tfsa_capital = float(args.monthly_tfsa_capital)
         rrsp_capital = float(args.monthly_rrsp_capital)
 
         logger.info(
-            "Computing monthly TFSA + RRSP portfolio (TFSA=%.0f, RRSP=%.0f) …",
+            "Computing weekly TFSA + RRSP portfolio (TFSA=%.0f, RRSP=%.0f) …",
             tfsa_capital,
             rrsp_capital,
         )
@@ -888,31 +888,31 @@ def main(argv: Optional[List[str]] = None) -> int:
                 int(args.monthly_rrsp_max_positions),
                 float(args.monthly_rrsp_max_position_pct),
             )
-            monthly_tfsa_stock = fut_m_tfsa_stock.result()
-            monthly_rrsp = fut_m_rrsp.result()
+            weekly_tfsa_stock = fut_m_tfsa_stock.result()
+            weekly_rrsp = fut_m_rrsp.result()
 
-        monthly_html = build_monthly_portfolio_email(
-            tfsa_stock=monthly_tfsa_stock,
-            rrsp=monthly_rrsp,
+        weekly_html = build_weekly_portfolio_email(
+            tfsa_stock=weekly_tfsa_stock,
+            rrsp=weekly_rrsp,
             tfsa_capital=tfsa_capital,
             rrsp_capital=rrsp_capital,
         )
-        monthly_subject = (
-            f"Monthly Portfolio Review — {date.today().strftime('%B %Y')}"
+        weekly_subject = (
+            f"Weekly Portfolio Review — week ending {date.today().strftime('%B %d, %Y')}"
         )
         try:
             send_email(
-                monthly_html,
-                recipients=monthly_recipients,
+                weekly_html,
+                recipients=weekly_recipients,
                 smtp_host=args.smtp_host,
                 smtp_port=args.smtp_port,
                 smtp_user=args.smtp_user,
                 smtp_password=args.smtp_password,
-                subject=monthly_subject,
+                subject=weekly_subject,
             )
-            logger.info("Monthly portfolio email sent to %s", monthly_recipients)
+            logger.info("Weekly portfolio email sent to %s", weekly_recipients)
         except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to send monthly portfolio email: %s", exc)
+            logger.error("Failed to send weekly portfolio email: %s", exc)
             return 1
 
     if args.run_log:
@@ -924,8 +924,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "rrsp": _rrsp_to_df(rrsp),
             }
             meta_extra = {
-                "monthly": {
-                    "enabled": bool(args.monthly_email),
+                "weekly": {
+                    "enabled": bool(args.weekly_email),
                     "tfsa_capital": float(args.monthly_tfsa_capital),
                     "rrsp_capital": float(args.monthly_rrsp_capital),
                     "tfsa_max_positions": int(args.monthly_tfsa_max_positions),
