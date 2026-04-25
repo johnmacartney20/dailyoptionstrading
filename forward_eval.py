@@ -68,12 +68,13 @@ def _fetch_close_on_or_after(ticker: str, target_date: str) -> Optional[float]:
 # ── P&L calculation ───────────────────────────────────────────────────────────
 
 # Round-trip commission assumed per share: $0.65 to open + $0.65 to close = $1.30
-# per contract ÷ 100 shares.  Spreads that expire worthless require only an
-# open leg (no close); we use the full round-trip as a conservative upper bound.
-_COMMISSION_PER_SHARE: float = 1.30 / 100.0
+# per contract ÷ 100 shares = $0.013 per share.  Spreads that expire worthless
+# require only an open leg (no close); the full round-trip is used as a
+# conservative upper bound.
+COMMISSION_PER_SHARE: float = 1.30 / 100.0
 
 
-def _realised_pnl_per_share(row: pd.Series, expiry_close: float) -> float:
+def realised_pnl_per_share(row: pd.Series, expiry_close: float) -> float:
     """Compute realised P&L *per share* for a short spread at expiry.
 
     Uses the **mid-price** ``(bid + ask) / 2`` as the assumed fill price, which
@@ -81,7 +82,7 @@ def _realised_pnl_per_share(row: pd.Series, expiry_close: float) -> float:
     bid when ``ask`` is absent or invalid (e.g. old run-log CSVs that pre-date
     the ``ask`` column).
 
-    A fixed round-trip commission of :data:`_COMMISSION_PER_SHARE` is subtracted
+    A fixed round-trip commission of :data:`COMMISSION_PER_SHARE` is subtracted
     from every outcome to reflect real transaction costs.
 
     **Short put (bull put spread)**:
@@ -99,6 +100,12 @@ def _realised_pnl_per_share(row: pd.Series, expiry_close: float) -> float:
     ask_raw = row.get("ask", None)
     ask = float(ask_raw) if ask_raw is not None and float(ask_raw) > 0 else bid
     if ask < bid:
+        logger.debug(
+            "ask (%.4f) < bid (%.4f) for %s — correcting to bid for mid-price calculation.",
+            ask,
+            bid,
+            row.get("ticker", "unknown"),
+        )
         ask = bid
     premium = (bid + ask) / 2.0
 
@@ -109,15 +116,15 @@ def _realised_pnl_per_share(row: pd.Series, expiry_close: float) -> float:
 
     if option_type == "put":
         if expiry_close >= strike:
-            return premium - _COMMISSION_PER_SHARE  # expired worthless — full credit
+            return premium - COMMISSION_PER_SHARE  # expired worthless — full credit
         raw_loss = strike - expiry_close - premium
-        return -min(raw_loss, max_loss_per_share) - _COMMISSION_PER_SHARE
+        return -min(raw_loss, max_loss_per_share) - COMMISSION_PER_SHARE
 
     if option_type == "call":
         if expiry_close <= strike:
-            return premium - _COMMISSION_PER_SHARE  # expired worthless — full credit
+            return premium - COMMISSION_PER_SHARE  # expired worthless — full credit
         raw_loss = expiry_close - strike - premium
-        return -min(raw_loss, max_loss_per_share) - _COMMISSION_PER_SHARE
+        return -min(raw_loss, max_loss_per_share) - COMMISSION_PER_SHARE
 
     return 0.0
 
@@ -167,7 +174,7 @@ def evaluate_run(final_csv: Path) -> pd.DataFrame:
             )
             continue
 
-        pnl = _realised_pnl_per_share(row, expiry_close)
+        pnl = realised_pnl_per_share(row, expiry_close)
         outcome = "profit" if pnl > 0 else ("loss" if pnl < 0 else "breakeven")
         records.append(
             {
