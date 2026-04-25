@@ -420,7 +420,7 @@ def _estimate_weekly_return_stability(score: float) -> float:
     if score <= 60:
         return -0.23 + (score - 30) / 30.0 * 0.58
     if score <= 80:
-        return 0.35 + (score - 60) / 20.0 * 0.34
+        return 0.35 + (score - 60) / 20.0 * 0.35
     return 0.69 + (score - 80) / 20.0 * 0.46
 
 

@@ -684,43 +684,43 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
-        "--monthly-tfsa-capital",
+        "--weekly-tfsa-capital",
         type=float,
         default=25_000.0,
         help="TFSA capital used in the weekly review email (default: 25000).",
     )
     parser.add_argument(
-        "--monthly-rrsp-capital",
+        "--weekly-rrsp-capital",
         type=float,
         default=25_000.0,
         help="RRSP capital used in the weekly review email (default: 25000).",
     )
     parser.add_argument(
-        "--monthly-tfsa-max-positions",
+        "--weekly-tfsa-max-positions",
         type=int,
         default=5,
         help="Max TFSA stock positions in the weekly review (default: 5).",
     )
     parser.add_argument(
-        "--monthly-tfsa-max-position-pct",
+        "--weekly-tfsa-max-position-pct",
         type=float,
         default=0.35,
         help="Max per-position fraction for TFSA weekly review (default: 0.35).",
     )
     parser.add_argument(
-        "--monthly-tfsa-max-sector-pct",
+        "--weekly-tfsa-max-sector-pct",
         type=float,
         default=0.40,
         help="Max sector fraction for TFSA weekly review (default: 0.40).",
     )
     parser.add_argument(
-        "--monthly-rrsp-max-positions",
+        "--weekly-rrsp-max-positions",
         type=int,
         default=6,
         help="Max RRSP positions in the weekly review (default: 6).",
     )
     parser.add_argument(
-        "--monthly-rrsp-max-position-pct",
+        "--weekly-rrsp-max-position-pct",
         type=float,
         default=0.30,
         help="Max per-position fraction for RRSP weekly review (default: 0.30).",
@@ -863,8 +863,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             addr.strip() for addr in args.weekly_email.split(",") if addr.strip()
         ]
 
-        tfsa_capital = float(args.monthly_tfsa_capital)
-        rrsp_capital = float(args.monthly_rrsp_capital)
+        tfsa_capital = float(args.weekly_tfsa_capital)
+        rrsp_capital = float(args.weekly_rrsp_capital)
 
         logger.info(
             "Computing weekly TFSA + RRSP portfolio (TFSA=%.0f, RRSP=%.0f) …",
@@ -876,17 +876,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                 allocate_tfsa_stock_portfolio,
                 tfsa_stock_histories,
                 tfsa_capital,
-                int(args.monthly_tfsa_max_positions),
-                float(args.monthly_tfsa_max_position_pct),
-                float(args.monthly_tfsa_max_sector_pct),
+                int(args.weekly_tfsa_max_positions),
+                float(args.weekly_tfsa_max_position_pct),
+                float(args.weekly_tfsa_max_sector_pct),
                 market_ret,
             )
             fut_m_rrsp = executor.submit(
                 allocate_rrsp_portfolio,
                 rrsp_histories,
                 rrsp_capital,
-                int(args.monthly_rrsp_max_positions),
-                float(args.monthly_rrsp_max_position_pct),
+                int(args.weekly_rrsp_max_positions),
+                float(args.weekly_rrsp_max_position_pct),
             )
             weekly_tfsa_stock = fut_m_tfsa_stock.result()
             weekly_rrsp = fut_m_rrsp.result()
@@ -926,13 +926,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             meta_extra = {
                 "weekly": {
                     "enabled": bool(args.weekly_email),
-                    "tfsa_capital": float(args.monthly_tfsa_capital),
-                    "rrsp_capital": float(args.monthly_rrsp_capital),
-                    "tfsa_max_positions": int(args.monthly_tfsa_max_positions),
-                    "tfsa_max_position_pct": float(args.monthly_tfsa_max_position_pct),
-                    "tfsa_max_sector_pct": float(args.monthly_tfsa_max_sector_pct),
-                    "rrsp_max_positions": int(args.monthly_rrsp_max_positions),
-                    "rrsp_max_position_pct": float(args.monthly_rrsp_max_position_pct),
+                    "tfsa_capital": float(args.weekly_tfsa_capital),
+                    "rrsp_capital": float(args.weekly_rrsp_capital),
+                    "tfsa_max_positions": int(args.weekly_tfsa_max_positions),
+                    "tfsa_max_position_pct": float(args.weekly_tfsa_max_position_pct),
+                    "tfsa_max_sector_pct": float(args.weekly_tfsa_max_sector_pct),
+                    "rrsp_max_positions": int(args.weekly_rrsp_max_positions),
+                    "rrsp_max_position_pct": float(args.weekly_rrsp_max_position_pct),
                 }
             }
             _log_run(
