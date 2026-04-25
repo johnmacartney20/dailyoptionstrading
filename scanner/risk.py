@@ -36,6 +36,13 @@ def add_position_sizing_columns(
     out = suggestions.copy()
 
     def notional_per_contract(row: pd.Series) -> float:
+        # For defined-risk spreads use max_spread_loss as the actual capital
+        # at risk per contract — it equals (spread_width − premium) × 100
+        # which is far smaller than strike × 100 for high-priced underlyings.
+        max_loss = float(row.get("max_spread_loss", 0.0) or 0.0)
+        if max_loss > 0:
+            return max_loss
+        # Fallback for rows without spread info (naked / unenriched options).
         option_type = str(row.get("option_type", ""))
         if option_type == "put":
             strike = float(row.get("strike", 0.0) or 0.0)

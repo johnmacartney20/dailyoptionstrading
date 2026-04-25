@@ -243,3 +243,73 @@ def get_options_chain(
                     ticker, expiry, _MAX_RETRIES, exc,
                 )
     return None
+
+
+def check_data_health(tickers: List[str], sample_size: int = 10) -> dict:
+    """Return a dict summarising data-feed health for a sample of *tickers*.
+
+    Fetches the current price for up to *sample_size* tickers and reports
+    the fraction that returned a valid non-None price.  Use this as a
+    pre-flight check before a full scan run to detect Yahoo Finance outages
+    or rate-limiting before spending time on the full ticker universe.
+
+    Returns
+    -------
+    dict with keys:
+
+    ``checked``
+        Number of tickers sampled.
+    ``valid``
+        Number that returned a positive price.
+    ``valid_pct``
+        Fraction 0–1.
+    ``status``
+        ``"ok"`` (≥ 90 % valid), ``"degraded"`` (70–89 %), or ``"down"``
+        (< 70 %).
+    ``failed_tickers``
+        List of tickers that returned no valid price.
+    """
+    sample = tickers[:sample_size]
+    failed: List[str] = []
+    valid = 0
+    for ticker in sample:
+        price = get_stock_price(ticker)
+        if price is not None and price > 0:
+            valid += 1
+        else:
+            failed.append(ticker)
+
+    checked = len(sample)
+    valid_pct = valid / checked if checked > 0 else 0.0
+
+    if valid_pct >= 0.90:
+        status = "ok"
+    elif valid_pct >= 0.70:
+        status = "degraded"
+    else:
+        status = "down"
+
+    if status != "ok":
+        logger.warning(
+            "Data health check: %s — %d/%d tickers returned valid prices "
+            "(%.0f%%). Failed: %s",
+            status.upper(),
+            valid,
+            checked,
+            valid_pct * 100,
+            ", ".join(failed) if failed else "none",
+        )
+    else:
+        logger.debug(
+            "Data health check: OK — %d/%d tickers returned valid prices.",
+            valid,
+            checked,
+        )
+
+    return {
+        "checked": checked,
+        "valid": valid,
+        "valid_pct": valid_pct,
+        "status": status,
+        "failed_tickers": failed,
+    }

@@ -435,9 +435,13 @@ def _weekly_perf_section_html(
     html += "<h2>📈 Section 1 — Performance Summary</h2>"
     html += (
         '<p class="strategy-note">'
-        "Returns below are <em>simulated estimates</em> derived from each position's "
-        "composite momentum and stability score. They reflect expected behavior given "
-        "current trend, volatility, and liquidity conditions — not guaranteed results."
+        "<strong>⚠️ Important:</strong> Returns below are <em>score-derived estimates only</em>. "
+        "The mapping from composite score to return % is a linear approximation with "
+        "<strong>no empirical calibration</strong> — it has not been validated against "
+        "historical trade outcomes. These figures are purely illustrative and should "
+        "<strong>not</strong> be used to set return expectations or make allocation decisions. "
+        "Run <code>forward_eval.py</code> on past run-log CSVs to build an evidence-based "
+        "performance baseline."
         "</p>"
     )
 
