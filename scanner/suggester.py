@@ -107,6 +107,28 @@ def screen_options(
         )
         return pd.DataFrame()
 
+    # ── Pre-market gap direction filter ──────────────────────────────────────
+    # A large downside gap (stock opened ≥ 3 % lower) signals negative near-
+    # term sentiment; short puts on such names carry elevated assignment risk.
+    # Symmetrically, a large upside gap suppresses short calls.
+    # The threshold is 3 % to match the OTM inner band (min_otm_pct = 0.03).
+    _GAP_THRESHOLD = 0.03
+    if premarket_gap is not None:
+        if option_type == "put" and premarket_gap <= -_GAP_THRESHOLD:
+            logger.info(
+                "Pre-market gap filter: suppressing %s puts for %s "
+                "(gap = %+.1f%% ≤ −%.0f%%).",
+                expiry, ticker, premarket_gap * 100, _GAP_THRESHOLD * 100,
+            )
+            return pd.DataFrame()
+        if option_type == "call" and premarket_gap >= _GAP_THRESHOLD:
+            logger.info(
+                "Pre-market gap filter: suppressing %s calls for %s "
+                "(gap = %+.1f%% ≥ +%.0f%%).",
+                expiry, ticker, premarket_gap * 100, _GAP_THRESHOLD * 100,
+            )
+            return pd.DataFrame()
+
     # Enrich with computed metrics
     df = enrich_options(
         options_df, stock_price, option_type, expiry, ticker,

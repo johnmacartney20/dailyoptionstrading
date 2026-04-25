@@ -1,6 +1,7 @@
 """Unit tests for scanner.risk."""
 
 import pandas as pd
+import pytest
 
 from scanner.risk import add_position_sizing_columns, allocate_under_total_notional
 
@@ -42,3 +43,32 @@ def test_allocate_under_total_notional_respects_budget_and_ticker_cap():
     # Only one trade per ticker, so we should get AAA (top one) + BBB.
     assert picked["ticker"].tolist() == ["AAA", "BBB"]
     assert picked["selected_contracts"].tolist() == [1, 1]
+
+
+def test_notional_uses_max_spread_loss_when_available():
+    """When max_spread_loss is present, it should be used as notional — not strike × 100.
+
+    A high-priced stock (e.g. strike=$200) has a notional of $20 000 per contract
+    when computed as strike × 100.  But for a defined-risk $5-wide bull put spread
+    the actual capital at risk is only max_spread_loss ≈ $450, allowing far more
+    contracts to fit within a given cash budget.
+    """
+    # strike=$200 → strike×100 = $20 000; max_spread_loss=$450 (spread-based)
+    df = pd.DataFrame(
+        [
+            {
+                "ticker": "EXPNS",
+                "option_type": "put",
+                "strike": 200.0,
+                "stock_price": 210.0,
+                "score": 50.0,
+                "max_spread_loss": 450.0,
+            }
+        ]
+    )
+    out = add_position_sizing_columns(df, account_cash=10_000.0)
+
+    assert "notional_per_contract" in out.columns
+    assert out.loc[0, "notional_per_contract"] == pytest.approx(450.0)
+    # floor(10000 / 450) = 22
+    assert int(out.loc[0, "max_contracts"]) == 22

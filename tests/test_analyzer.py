@@ -659,3 +659,47 @@ def test_enrich_options_earnings_none_flag_false():
     enriched = enrich_options(df, 100.0, "put", expiry, "AAPL", earnings_date=None)
     assert bool(enriched["earnings_within_expiry"].iloc[0]) is False
 
+
+# ── score_option monotonicity ─────────────────────────────────────────────────
+
+
+def test_score_option_monotone_increasing_with_otm_pct():
+    """Score must increase as OTM % rises from 3 % → 8 % → 13 % (all else equal).
+
+    This checks the core ranking logic: wider-OTM strikes should always score
+    higher than tighter ones when every other input is held constant, because
+    increased distance translates directly to higher distance score and (via PoP)
+    higher probability of profit.
+    """
+    base = dict(
+        bid=1.5, ask=1.6, strike=100.0, stock_price=100.0,
+        open_interest=2000, implied_volatility=0.35,
+    )
+    s_3pct = score_option(**base, otm_pct=0.03)
+    s_8pct = score_option(**base, otm_pct=0.08)
+    s_13pct = score_option(**base, otm_pct=0.13)
+    assert s_8pct > s_3pct, "8 % OTM must outscore 3 % OTM"
+    assert s_13pct > s_8pct, "13 % OTM must outscore 8 % OTM"
+
+
+def test_score_option_pop_scaling_reduces_score():
+    """Lower PoP should yield a strictly lower score than higher PoP at the same OTM%."""
+    base = dict(
+        bid=1.5, ask=1.6, strike=100.0, stock_price=100.0,
+        open_interest=2000, implied_volatility=0.35, otm_pct=0.07,
+    )
+    s_high = score_option(**base, pop=0.88)
+    s_low = score_option(**base, pop=0.58)
+    assert s_high > s_low, "pop=0.88 must score higher than pop=0.58"
+
+
+def test_score_option_pop_full_equals_no_pop():
+    """pop=1.0 (certainty) must produce the same score as passing no PoP at all."""
+    base = dict(
+        bid=1.5, ask=1.6, strike=100.0, stock_price=100.0,
+        open_interest=2000, implied_volatility=0.35, otm_pct=0.07,
+    )
+    assert score_option(**base, pop=None) == pytest.approx(
+        score_option(**base, pop=1.0), rel=1e-9
+    )
+
