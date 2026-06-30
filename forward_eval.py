@@ -24,12 +24,15 @@ import logging
 import math
 import os
 import sys
+import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 import yfinance as yf
+
+from scanner.config import PORTFOLIO_STATE_FILE
 
 logging.basicConfig(
     level=logging.INFO,
@@ -209,6 +212,76 @@ def evaluate_all_runs(runs_dir: Path) -> pd.DataFrame:
     return pd.concat(non_empty, ignore_index=True)
 
 
+def evaluate_closed_positions(state_file: Path) -> pd.DataFrame:
+    """Evaluate closed positions captured in persistent portfolio state.
+
+    Returns columns including entry/exit score, score drift and (when
+    derivable) realised P&L.
+    """
+    if not state_file.exists():
+        logger.info("State file %s not found; skipping closed-position evaluation.", state_file)
+        return pd.DataFrame()
+
+    try:
+        state = json.loads(state_file.read_text())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not parse state file %s: %s", state_file, exc)
+        return pd.DataFrame()
+
+    closed = state.get("closed_positions", [])
+    if not closed:
+        return pd.DataFrame()
+
+    rows = []
+    for pos in closed:
+        ticker = str(pos.get("ticker", ""))
+        sub = str(pos.get("sub_portfolio", "")).lower()
+        entry_score = float(pos.get("entry_composite_score", 0.0) or 0.0)
+        exit_score = float(pos.get("exit_score", pos.get("last_review_score", 0.0)) or 0.0)
+        score_drift = exit_score - entry_score
+
+        entry_date = str(pos.get("entry_date", ""))
+        exit_date = str(pos.get("exit_date", ""))
+        quantity = int(pos.get("quantity", 0) or 0)
+        entry_price = float(pos.get("entry_price", 0.0) or 0.0)
+
+        days_held = 0
+        try:
+            if entry_date and exit_date:
+                days_held = max((datetime.strptime(exit_date, "%Y-%m-%d") - datetime.strptime(entry_date, "%Y-%m-%d")).days, 0)
+        except ValueError:
+            days_held = 0
+
+        realised_pnl = float("nan")
+        exit_price = float("nan")
+        if quantity > 0 and entry_price > 0 and sub in {"growth", "stability"} and exit_date:
+            maybe_close = _fetch_close_on_or_after(ticker, exit_date)
+            if maybe_close is not None:
+                exit_price = float(maybe_close)
+                realised_pnl = (exit_price - entry_price) * quantity
+
+        rows.append(
+            {
+                "source": "state_closed",
+                "ticker": ticker,
+                "account_type": pos.get("account_type", ""),
+                "sub_portfolio": pos.get("sub_portfolio", ""),
+                "entry_date": entry_date,
+                "exit_date": exit_date,
+                "days_held": days_held,
+                "entry_score": round(entry_score, 4),
+                "exit_score": round(exit_score, 4),
+                "score_drift": round(score_drift, 4),
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "quantity": quantity,
+                "realised_pnl": realised_pnl,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
 # ── Statistics ────────────────────────────────────────────────────────────────
 
 
@@ -302,6 +375,64 @@ def print_summary(results: pd.DataFrame) -> None:
         print(results[display_cols].to_string(index=False))
 
 
+def print_closed_positions_summary(results: pd.DataFrame) -> None:
+    """Print summary for state-driven closed-position analysis."""
+    if results.empty:
+        print("\nNo closed positions found in portfolio state.")
+        return
+
+    sep = "=" * 72
+    print(f"\n{sep}")
+    print("  CLOSED POSITION REVIEW (STATE JSON)")
+    print(sep)
+    print(f"  Closed positions   : {len(results)}")
+
+    valid_drift = results.dropna(subset=["entry_score", "exit_score"])
+    if not valid_drift.empty:
+        avg_drift = valid_drift["score_drift"].mean()
+        print(f"  Avg score drift    : {avg_drift:+.3f}")
+
+    pnl_valid = results.dropna(subset=["realised_pnl"])
+    if not pnl_valid.empty:
+        avg_pnl = pnl_valid["realised_pnl"].mean()
+        print(f"  Avg realised P&L   : ${avg_pnl:+.2f}")
+        if len(pnl_valid) >= 2:
+            corr = _spearman_correlation(pnl_valid["exit_score"], pnl_valid["realised_pnl"])
+            print(f"  Exit score vs P&L  : {corr:+.3f}")
+
+    print(f"{sep}\n")
+    cols = [
+        c
+        for c in (
+            "ticker",
+            "account_type",
+            "sub_portfolio",
+            "entry_date",
+            "exit_date",
+            "days_held",
+            "entry_score",
+            "exit_score",
+            "score_drift",
+            "realised_pnl",
+        )
+        if c in results.columns
+    ]
+    try:
+        from tabulate import tabulate  # noqa: PLC0415
+
+        print(
+            tabulate(
+                results[cols],
+                headers="keys",
+                tablefmt="simple",
+                showindex=False,
+                floatfmt=".3f",
+            )
+        )
+    except ImportError:
+        print(results[cols].to_string(index=False))
+
+
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
 
@@ -318,6 +449,11 @@ def main(argv=None) -> int:
         help="Directory containing run-log CSVs (written by main.py --run-log).",
     )
     parser.add_argument(
+        "--state-file",
+        default=PORTFOLIO_STATE_FILE,
+        help="Portfolio state JSON file used to evaluate closed-position score drift.",
+    )
+    parser.add_argument(
         "--output",
         default=None,
         metavar="FILE",
@@ -326,15 +462,23 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     run_dir = Path(args.run_dir)
-    if not run_dir.exists():
-        logger.error("Run-log directory '%s' does not exist.", run_dir)
-        return 1
+    if run_dir.exists():
+        results = evaluate_all_runs(run_dir)
+    else:
+        logger.warning("Run-log directory '%s' does not exist. Skipping run-log evaluation.", run_dir)
+        results = pd.DataFrame()
 
-    results = evaluate_all_runs(run_dir)
     print_summary(results)
 
+    closed_results = evaluate_closed_positions(Path(args.state_file))
+    print_closed_positions_summary(closed_results)
+
     if args.output and not results.empty:
-        results.to_csv(args.output, index=False)
+        out = results.copy()
+        if not closed_results.empty:
+            aligned = closed_results.rename(columns={"realised_pnl": "realised_pnl_per_share"})
+            out = pd.concat([out, aligned], ignore_index=True, sort=False)
+        out.to_csv(args.output, index=False)
         logger.info("Results saved to %s", args.output)
 
     return 0

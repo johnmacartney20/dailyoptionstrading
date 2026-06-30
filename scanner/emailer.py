@@ -18,7 +18,7 @@ import smtplib
 from datetime import date
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -99,6 +99,117 @@ _EMAIL_COLUMNS = {
     "spread_structure": "Spread",
     "score": "Score",
 }
+
+
+def _portfolio_summary_to_html(summary: Dict[str, Any]) -> str:
+    """Render the top-level portfolio summary block."""
+    total = int(summary.get("total_positions", 0))
+    by_account = summary.get("by_account", {}) or {}
+    by_status = summary.get("by_status", {}) or {}
+
+    account_parts = [f"{k}: <strong>{v}</strong>" for k, v in sorted(by_account.items())]
+    status_parts = [f"{k}: <strong>{v}</strong>" for k, v in sorted(by_status.items())]
+
+    html = '<div class="port-box">'
+    html += "<h2>🧭 Portfolio Snapshot (Before New Entries)</h2>"
+    html += (
+        f"<p class='port-summary'>Total positions: <strong>{total}</strong></p>"
+        f"<p class='port-summary'>By account: {' | '.join(account_parts) if account_parts else 'n/a'}</p>"
+        f"<p class='port-summary'>Today verdicts: {' | '.join(status_parts) if status_parts else 'n/a'}</p>"
+    )
+    html += "</div>"
+    return html
+
+
+def _holdings_review_to_html(review_df: pd.DataFrame) -> str:
+    """Render holdings review table (portfolio-first section)."""
+    html = '<div class="port-box">'
+    html += "<h2>🔎 Holdings Review — Daily Re-Score</h2>"
+
+    if review_df is None or review_df.empty:
+        html += "<p>No active holdings to review today.</p></div>"
+        return html
+
+    cols = [
+        "ticker",
+        "account",
+        "sub_portfolio",
+        "entry_score",
+        "current_score",
+        "score_delta",
+        "days_held",
+        "verdict",
+        "reason",
+    ]
+    display = review_df[[c for c in cols if c in review_df.columns]].copy()
+    rename = {
+        "ticker": "Ticker",
+        "account": "Account",
+        "sub_portfolio": "Sub-Portfolio",
+        "entry_score": "Entry Score",
+        "current_score": "Current Score",
+        "score_delta": "Delta",
+        "days_held": "Days Held",
+        "verdict": "Verdict",
+        "reason": "Reason",
+    }
+    display.columns = [rename.get(c, c) for c in display.columns]
+
+    headers = "".join(f"<th>{h}</th>" for h in display.columns)
+    rows = ""
+    for _, row in display.iterrows():
+        cells = "".join(f"<td>{v}</td>" for v in row)
+        rows += f"<tr>{cells}</tr>"
+    html += f"<table><thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table>"
+    html += "</div>"
+    return html
+
+
+def _entry_bar_candidates_to_html(
+    suggestions: pd.DataFrame,
+    entry_bar: float,
+    rejected_candidates: Optional[List[Dict[str, Any]]] = None,
+    top: int = 10,
+) -> str:
+    """Render candidate pass/fail section around the entry threshold."""
+    html = '<div class="port-box">'
+    html += "<h2>🆕 New Candidates — Entry Bar Decisions</h2>"
+
+    if suggestions is None or suggestions.empty:
+        html += "<p>No candidates were generated today.</p></div>"
+        return html
+
+    if "score" in suggestions.columns:
+        cleared = suggestions[suggestions["score"] >= entry_bar]
+    else:
+        cleared = pd.DataFrame()
+    html += (
+        f"<p class='meta'>Entry bar: <strong>{entry_bar:.2f}</strong> | "
+        f"Cleared: <strong>{len(cleared)}</strong> / {len(suggestions)}</p>"
+    )
+
+    if not cleared.empty:
+        html += "<h3>Cleared Entry Bar</h3>"
+        html += _df_to_html_table(cleared, top=top)
+    else:
+        html += "<p>No candidates cleared the entry bar.</p>"
+
+    if rejected_candidates:
+        rej_df = pd.DataFrame(rejected_candidates)
+        keep_cols = [c for c in ["ticker", "score", "reason"] if c in rej_df.columns]
+        if keep_cols:
+            html += "<h3>Passed / Deferred (with reason)</h3>"
+            sub = rej_df[keep_cols].head(top * 2).copy()
+            sub.columns = ["Ticker", "Score", "Reason"]
+            headers = "".join(f"<th>{h}</th>" for h in sub.columns)
+            rows = ""
+            for _, row in sub.iterrows():
+                cells = "".join(f"<td>{v}</td>" for v in row)
+                rows += f"<tr>{cells}</tr>"
+            html += f"<table><thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table>"
+
+    html += "</div>"
+    return html
 
 
 def _df_to_html_table(df: pd.DataFrame, top: int) -> str:
@@ -768,10 +879,28 @@ def build_html_email(
     tfsa_allocation: Optional[TfsaAllocation] = None,
     tfsa_stock: Optional[TfsaStockPortfolio] = None,
     rrsp: Optional[RrspPortfolio] = None,
+    holdings_review: Optional[pd.DataFrame] = None,
+    portfolio_state_summary: Optional[Dict[str, Any]] = None,
+    entry_bar: float = 0.0,
+    rejected_candidates: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """Return a complete HTML email string for the given *suggestions* DataFrame."""
     today = date.today().strftime("%Y-%m-%d")
     html = _HTML_HEAD.format(date=today, exchange=exchange.upper(), total=len(suggestions))
+
+    if portfolio_state_summary is not None:
+        html += _portfolio_summary_to_html(portfolio_state_summary)
+
+    if holdings_review is not None:
+        html += _holdings_review_to_html(holdings_review)
+
+    if entry_bar > 0:
+        html += _entry_bar_candidates_to_html(
+            suggestions=suggestions,
+            entry_bar=entry_bar,
+            rejected_candidates=rejected_candidates,
+            top=top,
+        )
 
     if portfolio is not None:
         html += _portfolio_to_html(portfolio)
@@ -785,13 +914,17 @@ def build_html_email(
     if rrsp is not None:
         html += _rrsp_to_html(rrsp)
 
-    for opt_type, label in _STRATEGY_LABELS.items():
-        sub = suggestions[suggestions["option_type"] == opt_type]
-        if sub.empty:
-            continue
-        html += f"<h2>{label}</h2>"
-        html += f"<p class='meta'>Showing top {min(len(sub), top)}</p>"
-        html += _df_to_html_table(sub, top)
+    if suggestions is not None and not suggestions.empty and "option_type" in suggestions.columns:
+        for opt_type, label in _STRATEGY_LABELS.items():
+            sub = suggestions[suggestions["option_type"] == opt_type]
+            if sub.empty:
+                continue
+            html += f"<h2>{label}</h2>"
+            html += f"<p class='meta'>Showing top {min(len(sub), top)}</p>"
+            html += _df_to_html_table(sub, top)
+    else:
+        html += "<h2>Daily Options Suggestions</h2>"
+        html += "<p class='meta'>No qualifying options met filters today.</p>"
 
     html += _HTML_FOOT
     return html

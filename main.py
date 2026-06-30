@@ -43,7 +43,16 @@ from typing import List, Optional
 
 import pandas as pd
 
-from scanner.config import NASDAQ_TICKERS, RRSP_TICKERS, SCREENING_PARAMS, TSX_TICKERS
+from scanner.config import (
+    NASDAQ_TICKERS,
+    PORTFOLIO_STATE_FILE,
+    PORTFOLIO_THRESHOLDS,
+    RRSP_CURRENT_HOLDINGS,
+    RRSP_TICKERS,
+    SCREENING_PARAMS,
+    TFSA_CURRENT_HOLDINGS,
+    TSX_TICKERS,
+)
 from scanner.data_fetcher import (
     get_earnings_date,
     get_expiration_dates,
@@ -54,6 +63,13 @@ from scanner.data_fetcher import (
     get_stock_price,
 )
 from scanner.emailer import build_html_email, build_weekly_portfolio_email, send_email
+from scanner.holdings_reviewer import (
+    HoldingReview,
+    apply_reviews_to_positions,
+    review_holdings,
+    review_summary,
+    reviews_to_frame,
+)
 from scanner.portfolio_allocator import (
     PortfolioAllocation,
     RrspPortfolio,
@@ -63,6 +79,18 @@ from scanner.portfolio_allocator import (
     allocate_rrsp_portfolio,
     allocate_tfsa_portfolio,
     allocate_tfsa_stock_portfolio,
+)
+from scanner.portfolio_state import (
+    STATUS_FLAG,
+    STATUS_HOLD,
+    add_or_update_position,
+    build_position,
+    get_holding_tickers,
+    get_positions,
+    load_or_initialize_state,
+    move_exited_positions,
+    portfolio_summary,
+    save_portfolio_state,
 )
 from scanner.risk import (
     add_position_sizing_columns,
@@ -221,6 +249,170 @@ def _rrsp_to_df(rrsp: RrspPortfolio) -> pd.DataFrame:
             for t in rrsp.selected
         ]
     )
+
+
+def _print_holdings_review(reviews: List[HoldingReview]) -> None:
+    """Pretty-print daily holdings review verdicts to stdout."""
+    sep = "=" * 100
+    dash = "-" * 100
+
+    print(f"\n{sep}")
+    print("  HOLDINGS REVIEW  —  Daily Re-Scoring and Verdicts")
+    print(sep)
+
+    if not reviews:
+        print("  No active holdings to review.")
+        print(f"{sep}\n")
+        return
+
+    headers = [
+        "Ticker", "Account", "Sub-Portfolio", "Entry", "Current", "Delta", "Days", "Verdict", "Reason",
+    ]
+    col_w = [8, 8, 14, 7, 8, 7, 6, 8, 30]
+    header_row = "  " + "  ".join(h.ljust(col_w[i]) for i, h in enumerate(headers))
+    print(header_row)
+    print("  " + dash[:len(header_row) - 2])
+
+    for r in reviews:
+        row = [
+            r.ticker,
+            r.account_type,
+            r.sub_portfolio,
+            f"{r.entry_score:.1f}",
+            f"{r.current_score:.1f}",
+            f"{r.score_delta:+.1f}",
+            str(r.days_held),
+            r.verdict,
+            r.reason[:30],
+        ]
+        print("  " + "  ".join(str(v).ljust(col_w[i]) for i, v in enumerate(row)))
+
+    summary = review_summary(reviews)
+    print(
+        f"\n  Summary: total={summary.total} | HOLD={summary.holds} | "
+        f"FLAG={summary.flags} | EXIT={summary.exits}"
+    )
+    print(f"{sep}\n")
+
+
+def _entry_tags_from_text(text: str) -> List[str]:
+    """Extract up to three compact thesis tags from a reasoning string."""
+    if not text:
+        return ["model-score", "entry", "signal"]
+
+    tags: List[str] = []
+    for raw in text.replace(";", ",").split(","):
+        token = raw.strip()
+        if not token:
+            continue
+        tags.append(token[:40])
+        if len(tags) >= 3:
+            break
+
+    while len(tags) < 3:
+        tags.append("model-score")
+    return tags[:3]
+
+
+def _flagged_score_map(
+    state: dict,
+    account_type: str,
+    sub_portfolio: str,
+) -> dict[str, float]:
+    """Return ticker→score map for FLAG holdings in an account/sub-portfolio."""
+    flagged = get_positions(
+        state,
+        account_type=account_type,
+        sub_portfolio=sub_portfolio,
+        statuses=[STATUS_FLAG],
+    )
+    out: dict[str, float] = {}
+    for pos in flagged:
+        score = pos.get("last_review_score")
+        if score is None:
+            score = pos.get("entry_composite_score", 0.0)
+        out[str(pos.get("ticker", "")).upper()] = float(score or 0.0)
+    return out
+
+
+def _record_new_entries(
+    state: dict,
+    portfolio: PortfolioAllocation,
+    tfsa_opts: TfsaAllocation,
+    tfsa_stock: TfsaStockPortfolio,
+    rrsp: RrspPortfolio,
+) -> None:
+    """Write newly selected positions into persistent state."""
+    for t in portfolio.selected:
+        qty = max(int(t.allocation // max(t.max_loss, 1.0)), 1)
+        add_or_update_position(
+            state,
+            build_position(
+                ticker=t.ticker,
+                account_type="OPTIONS",
+                sub_portfolio="put-spread",
+                entry_price=round(t.max_profit / 100.0, 4),
+                quantity=qty,
+                entry_composite_score=t.score,
+                entry_thesis_tags=["risk-adjusted return", "otm quality", "liquidity"],
+                metadata={
+                    "option_type": "put",
+                    "expiry": t.expiration,
+                    "strike": t.short_strike,
+                    "long_strike": t.long_strike,
+                },
+            ),
+        )
+
+    for t in tfsa_opts.selected:
+        qty = max(int(t.allocation // max(t.max_loss, 1.0)), 1)
+        add_or_update_position(
+            state,
+            build_position(
+                ticker=t.ticker,
+                account_type="TFSA",
+                sub_portfolio="long-call",
+                entry_price=round(t.max_loss / 100.0, 4),
+                quantity=qty,
+                entry_composite_score=t.tfsa_score,
+                entry_thesis_tags=["upside ratio", "otm sweet spot", "liquidity"],
+                metadata={
+                    "option_type": "call",
+                    "expiry": t.expiration,
+                    "strike": t.buy_strike,
+                },
+            ),
+        )
+
+    for t in tfsa_stock.selected:
+        qty = max(int(t.allocation // max(t.current_price, 0.01)), 1)
+        add_or_update_position(
+            state,
+            build_position(
+                ticker=t.ticker,
+                account_type="TFSA",
+                sub_portfolio="growth",
+                entry_price=t.current_price,
+                quantity=qty,
+                entry_composite_score=t.composite_score,
+                entry_thesis_tags=_entry_tags_from_text(t.reasoning),
+            ),
+        )
+
+    for t in rrsp.selected:
+        qty = max(int(t.allocation // max(t.current_price, 0.01)), 1)
+        add_or_update_position(
+            state,
+            build_position(
+                ticker=t.ticker,
+                account_type="RRSP",
+                sub_portfolio="stability",
+                entry_price=t.current_price,
+                quantity=qty,
+                entry_composite_score=t.composite_score,
+                entry_thesis_tags=_entry_tags_from_text(t.long_term_thesis),
+            ),
+        )
 
 
 def scan_ticker(ticker: str) -> List[pd.DataFrame]:
@@ -488,6 +680,15 @@ def _print_suggestions(suggestions: pd.DataFrame, top: int) -> None:
     print(sep)
     print(f"  Total qualifying opportunities: {len(suggestions)}")
 
+    if suggestions.empty or "option_type" not in suggestions.columns:
+        print("  No qualifying options to display today.")
+        print(f"\n{sep}")
+        print("  Data source : Yahoo Finance (yfinance) – free public data")
+        print("  DISCLAIMER  : These suggestions are NOT financial advice.")
+        print("                Always do your own research before trading options.")
+        print(f"{sep}\n")
+        return
+
     strategy_labels = {
         "call": "COVERED CALLS  (sell call, own shares)",
         "put": "CASH-SECURED PUTS  (sell put, set aside cash)",
@@ -727,6 +928,29 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # ── Persistent state bootstrap + daily holdings review ───────────────────
+    state, seeded = load_or_initialize_state(
+        state_path=PORTFOLIO_STATE_FILE,
+        rrsp_holdings=RRSP_CURRENT_HOLDINGS,
+        tfsa_holdings=TFSA_CURRENT_HOLDINGS,
+    )
+    if seeded:
+        logger.info(
+            "Portfolio state %s created from legacy config holdings (initial run).",
+            PORTFOLIO_STATE_FILE,
+        )
+
+    active_positions = get_positions(state, statuses=[STATUS_HOLD, STATUS_FLAG])
+    market_ret = get_market_return("SPY", period_days=20)
+    reviews = review_holdings(
+        active_positions,
+        thresholds=PORTFOLIO_THRESHOLDS,
+        market_return_20d=market_ret,
+    )
+    apply_reviews_to_positions(active_positions, reviews)
+    _print_holdings_review(reviews)
+    move_exited_positions(state)
+
     # ── Build ticker list ──────────────────────────────────────────────────────
     tickers: List[str] = []
     if args.exchange in ("tsx", "all"):
@@ -785,11 +1009,40 @@ def main(argv: Optional[List[str]] = None) -> int:
                 max_trades_per_ticker=args.max_trades_per_ticker,
             )
 
+    entry_bar = float(PORTFOLIO_THRESHOLDS.get("entry_bar", 8.0))
+    displacement_margin = float(PORTFOLIO_THRESHOLDS.get("displacement_margin", 1.5))
+
+    options_existing = get_holding_tickers(
+        state,
+        account_type="OPTIONS",
+        sub_portfolio="put-spread",
+        statuses=[STATUS_HOLD, STATUS_FLAG],
+    )
+    tfsa_option_existing = get_holding_tickers(
+        state,
+        account_type="TFSA",
+        statuses=[STATUS_HOLD, STATUS_FLAG],
+    )
+
     # ── Options portfolio allocation ───────────────────────────────────────────
     # Both options allocations are independent — run them in parallel.
     with ThreadPoolExecutor(max_workers=2) as executor:
-        fut_portfolio = executor.submit(allocate_portfolio, suggestions)
-        fut_tfsa_opts = executor.submit(allocate_tfsa_portfolio, suggestions)
+        fut_portfolio = executor.submit(
+            allocate_portfolio,
+            suggestions,
+            existing_holdings=options_existing,
+            flagged_holdings_scores=_flagged_score_map(state, "OPTIONS", "put-spread"),
+            entry_score_min=entry_bar,
+            displacement_margin=displacement_margin,
+        )
+        fut_tfsa_opts = executor.submit(
+            allocate_tfsa_portfolio,
+            suggestions,
+            existing_holdings=tfsa_option_existing,
+            flagged_holdings_scores=_flagged_score_map(state, "TFSA", "long-call"),
+            entry_score_min=entry_bar,
+            displacement_margin=displacement_margin,
+        )
         portfolio = fut_portfolio.result()
         tfsa_opts = fut_tfsa_opts.result()
 
@@ -800,8 +1053,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     logger.info("Fetching price histories for TFSA/RRSP stock scoring …")
     tfsa_stock_histories = _fetch_price_histories(tickers)
     rrsp_histories = _fetch_price_histories(RRSP_TICKERS)
-    market_ret = get_market_return("SPY", period_days=20)
     logger.debug("SPY 20-day return used as market benchmark: %.2f%%", market_ret * 100)
+
+    tfsa_stock_existing = get_holding_tickers(
+        state,
+        account_type="TFSA",
+        statuses=[STATUS_HOLD, STATUS_FLAG],
+    )
+    rrsp_existing = get_holding_tickers(
+        state,
+        account_type="RRSP",
+        sub_portfolio="stability",
+        statuses=[STATUS_HOLD, STATUS_FLAG],
+    )
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         fut_tfsa_stock = executor.submit(
@@ -812,6 +1076,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             0.50,
             0.50,
             market_ret,
+            tfsa_stock_existing,
+            _flagged_score_map(state, "TFSA", "growth"),
+            entry_bar,
+            displacement_margin,
         )
         fut_rrsp = executor.submit(
             allocate_rrsp_portfolio,
@@ -819,6 +1087,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             1000.0,
             3,
             0.50,
+            rrsp_existing,
+            _flagged_score_map(state, "RRSP", "stability"),
+            entry_bar,
+            displacement_margin,
         )
         tfsa_stock = fut_tfsa_stock.result()
         rrsp = fut_rrsp.result()
@@ -826,6 +1098,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     _print_tfsa_stock_allocation(tfsa_stock)
     _print_rrsp_allocation(rrsp)
     _print_suggestions(suggestions, top=args.top)
+
+    # ── Persist state: add new entries after today's review/allocation ───────
+    _record_new_entries(state, portfolio, tfsa_opts, tfsa_stock, rrsp)
+    save_portfolio_state(state, PORTFOLIO_STATE_FILE)
+    state_summary = portfolio_summary(state)
+    reviews_df = reviews_to_frame(reviews)
+    rejected_candidates = [
+        {"ticker": r.ticker, "score": r.score, "reason": r.reason}
+        for r in (portfolio.rejected + tfsa_opts.rejected + tfsa_stock.rejected + rrsp.rejected)
+    ]
 
     # ── Optional CSV export ────────────────────────────────────────────────────
     if args.output:
@@ -843,6 +1125,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             tfsa_allocation=tfsa_opts,
             tfsa_stock=tfsa_stock,
             rrsp=rrsp,
+            holdings_review=reviews_df,
+            portfolio_state_summary=state_summary,
+            entry_bar=entry_bar,
+            rejected_candidates=rejected_candidates,
         )
         try:
             send_email(
@@ -880,6 +1166,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 float(args.weekly_tfsa_max_position_pct),
                 float(args.weekly_tfsa_max_sector_pct),
                 market_ret,
+                tfsa_stock_existing,
+                _flagged_score_map(state, "TFSA", "growth"),
+                entry_bar,
+                displacement_margin,
             )
             fut_m_rrsp = executor.submit(
                 allocate_rrsp_portfolio,
@@ -887,6 +1177,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 rrsp_capital,
                 int(args.weekly_rrsp_max_positions),
                 float(args.weekly_rrsp_max_position_pct),
+                rrsp_existing,
+                _flagged_score_map(state, "RRSP", "stability"),
+                entry_bar,
+                displacement_margin,
             )
             weekly_tfsa_stock = fut_m_tfsa_stock.result()
             weekly_rrsp = fut_m_rrsp.result()
@@ -924,6 +1218,16 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "rrsp": _rrsp_to_df(rrsp),
             }
             meta_extra = {
+                "portfolio_manager": {
+                    "state_file": PORTFOLIO_STATE_FILE,
+                    "thresholds": PORTFOLIO_THRESHOLDS,
+                    "review_counts": {
+                        "total": int(len(reviews)),
+                        "hold": int((reviews_df["verdict"] == "HOLD").sum()) if not reviews_df.empty else 0,
+                        "flag": int((reviews_df["verdict"] == "FLAG").sum()) if not reviews_df.empty else 0,
+                        "exit": int((reviews_df["verdict"] == "EXIT").sum()) if not reviews_df.empty else 0,
+                    },
+                },
                 "weekly": {
                     "enabled": bool(args.weekly_email),
                     "tfsa_capital": float(args.weekly_tfsa_capital),

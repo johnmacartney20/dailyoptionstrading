@@ -293,6 +293,10 @@ def allocate_portfolio(
     max_trades: int = 3,
     max_position_pct: float = 0.50,
     max_sector_pct: float = 0.50,
+    existing_holdings: Optional[List[str]] = None,
+    flagged_holdings_scores: Optional[Dict[str, float]] = None,
+    entry_score_min: float = 0.0,
+    displacement_margin: float = 0.0,
 ) -> PortfolioAllocation:
     """Select the top 2–*max_trades* put-spread trades and allocate *total_capital*.
 
@@ -333,24 +337,88 @@ def allocate_portfolio(
     if puts.empty:
         return result
 
+    # ── Seed deduplication sets from existing portfolio holdings ──────────────
+    held: List[str] = [t.upper() for t in (existing_holdings or [])]
+    held_sectors: List[str] = []
+    for held_ticker in held:
+        s = _get_sector(held_ticker)
+        if s not in held_sectors:
+            held_sectors.append(s)
+
     selected_rows: List[pd.Series] = []
-    selected_tickers: List[str] = []
-    selected_sectors: List[str] = []
+    selected_tickers: List[str] = list(held)
+    selected_sectors: List[str] = list(held_sectors)
+    available_slots = max(0, max_trades - len(held))
+    displaceable_flags: Dict[str, float] = {
+        str(t).upper(): float(s)
+        for t, s in (flagged_holdings_scores or {}).items()
+        if str(t).upper() in selected_tickers
+    }
     reference_dte: Optional[int] = None
 
     # Inspect a generous pool to surface useful rejection messages.
     candidate_pool = puts.head(max(max_trades * 5, 15))
 
     for _, row in candidate_pool.iterrows():
-        if len(selected_rows) >= max_trades:
-            break
-
         ticker = str(row["ticker"])
         sector = _get_sector(ticker)
+        row_score = float(row.get("score", 0.0))
+
+        if row_score < entry_score_min:
+            result.rejected.append(
+                RejectedCandidate(
+                    ticker,
+                    row_score,
+                    f"below entry bar ({row_score:.2f} < {entry_score_min:.2f})",
+                )
+            )
+            continue
+
+        if available_slots <= 0:
+            if not displaceable_flags:
+                result.rejected.append(
+                    RejectedCandidate(ticker, row_score, "no available slots")
+                )
+                continue
+
+            weak_ticker, weak_score = min(displaceable_flags.items(), key=lambda x: x[1])
+            if row_score < weak_score + displacement_margin:
+                result.rejected.append(
+                    RejectedCandidate(
+                        ticker,
+                        row_score,
+                        (
+                            f"does not displace FLAG {weak_ticker} "
+                            f"({row_score:.2f} < {weak_score + displacement_margin:.2f})"
+                        ),
+                    )
+                )
+                continue
+
+            available_slots += 1
+            displaceable_flags.pop(weak_ticker, None)
+            if weak_ticker in selected_tickers:
+                selected_tickers.remove(weak_ticker)
+            weak_sector = _get_sector(weak_ticker)
+            if weak_sector in selected_sectors:
+                selected_sectors.remove(weak_sector)
+            result.rejected.append(
+                RejectedCandidate(
+                    weak_ticker,
+                    weak_score,
+                    f"displaced by {ticker} ({row_score:.2f})",
+                )
+            )
+
+        if ticker in held:
+            result.rejected.append(
+                RejectedCandidate(ticker, row_score, "already in portfolio")
+            )
+            continue
 
         if ticker in selected_tickers:
             result.rejected.append(
-                RejectedCandidate(ticker, float(row["score"]), "duplicate ticker")
+                RejectedCandidate(ticker, row_score, "duplicate ticker")
             )
             continue
 
@@ -361,7 +429,7 @@ def allocate_portfolio(
             result.rejected.append(
                 RejectedCandidate(
                     ticker,
-                    float(row["score"]),
+                    row_score,
                     f"high correlation with {correlated_with}",
                 )
             )
@@ -369,7 +437,7 @@ def allocate_portfolio(
 
         if sector in selected_sectors:
             result.rejected.append(
-                RejectedCandidate(ticker, float(row["score"]), "duplicate sector exposure")
+                RejectedCandidate(ticker, row_score, "duplicate sector exposure")
             )
             continue
 
@@ -379,7 +447,7 @@ def allocate_portfolio(
                 result.rejected.append(
                     RejectedCandidate(
                         ticker,
-                        float(row["score"]),
+                        row_score,
                         f"DTE mismatch ({int(candidate_dte)}d vs reference {reference_dte}d)",
                     )
                 )
@@ -388,6 +456,7 @@ def allocate_portfolio(
         selected_rows.append(row)
         selected_tickers.append(ticker)
         selected_sectors.append(sector)
+        available_slots -= 1
         if reference_dte is None and candidate_dte is not None:
             reference_dte = int(candidate_dte)
 
@@ -430,6 +499,10 @@ def allocate_tfsa_portfolio(
     total_capital: float = 1000.0,
     max_trades: int = 2,
     max_position_pct: float = 0.60,
+    existing_holdings: Optional[List[str]] = None,
+    flagged_holdings_scores: Optional[Dict[str, float]] = None,
+    entry_score_min: float = 0.0,
+    displacement_margin: float = 0.0,
 ) -> TfsaAllocation:
     """Select 1–2 high-conviction long call trades for a TFSA account.
 
@@ -493,20 +566,83 @@ def allocate_tfsa_portfolio(
                 _TFSA_LONG_CALL_MAX_DTE,
             )
 
+    # ── Seed deduplication sets from existing portfolio holdings ──────────────
+    held: List[str] = [t.upper() for t in (existing_holdings or [])]
+    held_sectors: List[str] = []
+    for held_ticker in held:
+        s = _get_sector(held_ticker)
+        if s not in held_sectors:
+            held_sectors.append(s)
+
     selected_rows: List[pd.Series] = []
-    selected_tickers: List[str] = []
-    selected_sectors: List[str] = []
+    selected_tickers: List[str] = list(held)
+    selected_sectors: List[str] = list(held_sectors)
+    available_slots = max(0, max_trades - len(held))
+    displaceable_flags: Dict[str, float] = {
+        str(t).upper(): float(s)
+        for t, s in (flagged_holdings_scores or {}).items()
+        if str(t).upper() in selected_tickers
+    }
     reference_dte: Optional[int] = None
 
     candidate_pool = calls.head(max(max_trades * 5, 10))
 
     for _, row in candidate_pool.iterrows():
-        if len(selected_rows) >= max_trades:
-            break
-
         ticker = str(row["ticker"])
         sector = _get_sector(ticker)
         row_score = float(row.get(sort_col, 0.0))
+
+        if row_score < entry_score_min:
+            result.rejected.append(
+                RejectedCandidate(
+                    ticker,
+                    row_score,
+                    f"below entry bar ({row_score:.2f} < {entry_score_min:.2f})",
+                )
+            )
+            continue
+
+        if available_slots <= 0:
+            if not displaceable_flags:
+                result.rejected.append(
+                    RejectedCandidate(ticker, row_score, "no available slots")
+                )
+                continue
+
+            weak_ticker, weak_score = min(displaceable_flags.items(), key=lambda x: x[1])
+            if row_score < weak_score + displacement_margin:
+                result.rejected.append(
+                    RejectedCandidate(
+                        ticker,
+                        row_score,
+                        (
+                            f"does not displace FLAG {weak_ticker} "
+                            f"({row_score:.2f} < {weak_score + displacement_margin:.2f})"
+                        ),
+                    )
+                )
+                continue
+
+            available_slots += 1
+            displaceable_flags.pop(weak_ticker, None)
+            if weak_ticker in selected_tickers:
+                selected_tickers.remove(weak_ticker)
+            weak_sector = _get_sector(weak_ticker)
+            if weak_sector in selected_sectors:
+                selected_sectors.remove(weak_sector)
+            result.rejected.append(
+                RejectedCandidate(
+                    weak_ticker,
+                    weak_score,
+                    f"displaced by {ticker} ({row_score:.2f})",
+                )
+            )
+
+        if ticker in held:
+            result.rejected.append(
+                RejectedCandidate(ticker, row_score, "already in portfolio")
+            )
+            continue
 
         if ticker in selected_tickers:
             result.rejected.append(
@@ -546,6 +682,7 @@ def allocate_tfsa_portfolio(
         selected_rows.append(row)
         selected_tickers.append(ticker)
         selected_sectors.append(sector)
+        available_slots -= 1
         if reference_dte is None and candidate_dte is not None:
             reference_dte = int(candidate_dte)
 
@@ -635,6 +772,10 @@ def allocate_tfsa_stock_portfolio(
     max_position_pct: float = 0.50,
     max_sector_pct: float = 0.50,
     market_return_20d: float = 0.0,
+    existing_holdings: Optional[List[str]] = None,
+    flagged_holdings_scores: Optional[Dict[str, float]] = None,
+    entry_score_min: float = 0.0,
+    displacement_margin: float = 0.0,
 ) -> TfsaStockPortfolio:
     """Select up to *max_positions* high-conviction stocks for TFSA growth.
 
@@ -702,26 +843,85 @@ def allocate_tfsa_stock_portfolio(
     # Sort by composite score descending
     candidates.sort(key=lambda x: x[2].composite, reverse=True)
 
-    selected_tickers: List[str] = []
-    selected_sectors: List[str] = []
+    # ── Seed deduplication from existing holdings ──────────────────────────
+    held: List[str] = [t.upper() for t in (existing_holdings or [])]
+    held_sectors: List[str] = []
+    for held_ticker in held:
+        s = _get_sector(held_ticker)
+        if s not in held_sectors:
+            held_sectors.append(s)
+
+    selected_tickers: List[str] = list(held)
+    selected_sectors: List[str] = list(held_sectors)
     selected_items: List[tuple] = []
+    available_slots = max(0, max_positions - len(held))
+    displaceable_flags: Dict[str, float] = {
+        str(t).upper(): float(s)
+        for t, s in (flagged_holdings_scores or {}).items()
+        if str(t).upper() in selected_tickers
+    }
 
     # Inspect a generous pool to surface useful rejection messages
     candidate_pool = candidates[: max(max_positions * 5, 15)]
 
     for ticker, price, score in candidate_pool:
-        if len(selected_items) >= max_positions:
-            # Position limit reached – reject all remaining pool candidates explicitly.
+        if score.composite < entry_score_min:
             result.rejected.append(
                 RejectedCandidate(
                     ticker,
                     score.composite,
-                    f"lower composite score – outside top-{max_positions} selection",
+                    f"below entry bar ({score.composite:.2f} < {entry_score_min:.2f})",
                 )
             )
             continue
 
+        if available_slots <= 0:
+            if not displaceable_flags:
+                result.rejected.append(
+                    RejectedCandidate(
+                        ticker,
+                        score.composite,
+                        f"lower composite score – outside top-{max_positions} selection",
+                    )
+                )
+                continue
+
+            weak_ticker, weak_score = min(displaceable_flags.items(), key=lambda x: x[1])
+            if score.composite < weak_score + displacement_margin:
+                result.rejected.append(
+                    RejectedCandidate(
+                        ticker,
+                        score.composite,
+                        (
+                            f"does not displace FLAG {weak_ticker} "
+                            f"({score.composite:.2f} < {weak_score + displacement_margin:.2f})"
+                        ),
+                    )
+                )
+                continue
+
+            available_slots += 1
+            displaceable_flags.pop(weak_ticker, None)
+            if weak_ticker in selected_tickers:
+                selected_tickers.remove(weak_ticker)
+            weak_sector = _get_sector(weak_ticker)
+            if weak_sector in selected_sectors:
+                selected_sectors.remove(weak_sector)
+            result.rejected.append(
+                RejectedCandidate(
+                    weak_ticker,
+                    weak_score,
+                    f"displaced by {ticker} ({score.composite:.2f})",
+                )
+            )
+
         sector = _get_sector(ticker)
+
+        if ticker in held:
+            result.rejected.append(
+                RejectedCandidate(ticker, score.composite, "already in portfolio")
+            )
+            continue
 
         if ticker in selected_tickers:
             result.rejected.append(
@@ -749,6 +949,7 @@ def allocate_tfsa_stock_portfolio(
         selected_tickers.append(ticker)
         selected_sectors.append(sector)
         selected_items.append((ticker, price, score, sector))
+        available_slots -= 1
 
     # Candidates beyond the inspected pool are also rejected (lower score)
     for ticker, price, score in candidates[len(candidate_pool):]:
@@ -821,6 +1022,10 @@ def allocate_rrsp_portfolio(
     total_capital: float = 1000.0,
     max_positions: int = 4,
     max_position_pct: float = 0.50,
+    existing_holdings: Optional[List[str]] = None,
+    flagged_holdings_scores: Optional[Dict[str, float]] = None,
+    entry_score_min: float = 0.0,
+    displacement_margin: float = 0.0,
 ) -> RrspPortfolio:
     """Select up to *max_positions* positions for RRSP stability allocation.
 
@@ -871,25 +1076,84 @@ def allocate_rrsp_portfolio(
 
     candidates.sort(key=lambda x: x[2].composite, reverse=True)
 
-    selected_tickers: List[str] = []
-    selected_sectors: List[str] = []
+    # ── Seed deduplication from existing holdings ──────────────────────────
+    held: List[str] = [t.upper() for t in (existing_holdings or [])]
+    held_sectors: List[str] = []
+    for held_ticker in held:
+        s = _get_sector(held_ticker)
+        if s not in held_sectors:
+            held_sectors.append(s)
+
+    selected_tickers: List[str] = list(held)
+    selected_sectors: List[str] = list(held_sectors)
     selected_items: List[tuple] = []
+    available_slots = max(0, max_positions - len(held))
+    displaceable_flags: Dict[str, float] = {
+        str(t).upper(): float(s)
+        for t, s in (flagged_holdings_scores or {}).items()
+        if str(t).upper() in selected_tickers
+    }
 
     candidate_pool = candidates[: max(max_positions * 5, 15)]
 
     for ticker, price, score in candidate_pool:
-        if len(selected_items) >= max_positions:
-            # Position limit reached – reject remaining pool candidates explicitly.
+        if score.composite < entry_score_min:
             result.rejected.append(
                 RejectedCandidate(
                     ticker,
                     score.composite,
-                    f"lower stability score – outside top-{max_positions} selection",
+                    f"below entry bar ({score.composite:.2f} < {entry_score_min:.2f})",
                 )
             )
             continue
 
+        if available_slots <= 0:
+            if not displaceable_flags:
+                result.rejected.append(
+                    RejectedCandidate(
+                        ticker,
+                        score.composite,
+                        f"lower stability score – outside top-{max_positions} selection",
+                    )
+                )
+                continue
+
+            weak_ticker, weak_score = min(displaceable_flags.items(), key=lambda x: x[1])
+            if score.composite < weak_score + displacement_margin:
+                result.rejected.append(
+                    RejectedCandidate(
+                        ticker,
+                        score.composite,
+                        (
+                            f"does not displace FLAG {weak_ticker} "
+                            f"({score.composite:.2f} < {weak_score + displacement_margin:.2f})"
+                        ),
+                    )
+                )
+                continue
+
+            available_slots += 1
+            displaceable_flags.pop(weak_ticker, None)
+            if weak_ticker in selected_tickers:
+                selected_tickers.remove(weak_ticker)
+            weak_sector = _get_sector(weak_ticker)
+            if weak_sector in selected_sectors:
+                selected_sectors.remove(weak_sector)
+            result.rejected.append(
+                RejectedCandidate(
+                    weak_ticker,
+                    weak_score,
+                    f"displaced by {ticker} ({score.composite:.2f})",
+                )
+            )
+
         sector = _get_sector(ticker)
+
+        if ticker in held:
+            result.rejected.append(
+                RejectedCandidate(ticker, score.composite, "already in portfolio")
+            )
+            continue
 
         if ticker in selected_tickers:
             result.rejected.append(
@@ -917,6 +1181,7 @@ def allocate_rrsp_portfolio(
         selected_tickers.append(ticker)
         selected_sectors.append(sector)
         selected_items.append((ticker, price, score, sector))
+        available_slots -= 1
 
     # Candidates beyond the inspected pool are also rejected (lower score)
     for ticker, price, score in candidates[len(candidate_pool):]:

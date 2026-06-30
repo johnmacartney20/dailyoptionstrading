@@ -4,6 +4,8 @@ Ticker lists and screening parameters for TSX and NASDAQ options scanning.
 Data source: Yahoo Finance (free public data via yfinance).
 """
 
+from typing import Dict, List
+
 # ── TSX (Toronto Stock Exchange) tickers ──────────────────────────────────────
 # Yahoo Finance uses the ".TO" suffix for TSX-listed stocks.
 TSX_TICKERS = [
@@ -117,3 +119,53 @@ SCREENING_PARAMS = {
     # Maximum allowable max loss per spread contract (dollars)
     "max_spread_loss": 1000.0,
 }
+
+# ── Portfolio state and management thresholds ─────────────────────────────────
+# JSON file used as the persistent source of truth for all holdings.
+PORTFOLIO_STATE_FILE: str = "portfolio_state.json"
+
+# Lifecycle thresholds shared by holdings review and allocation logic.
+#
+# Interpretation:
+# - hold_floor: minimum score to keep a position as HOLD.
+# - hard_exit: score below this becomes EXIT.
+# - score_decay_warn_pct: warning threshold for score decay vs entry score.
+# - entry_bar: minimum score required for new entries.
+# - displacement_margin: new score required above FLAG holding score to replace it.
+PORTFOLIO_THRESHOLDS: Dict[str, float] = {
+    "hold_floor": 6.0,
+    "hard_exit": 4.5,
+    "score_decay_warn_pct": 0.30,
+    "entry_bar": 8.0,
+    "displacement_margin": 1.5,
+}
+
+# ── Legacy seeded holdings lists (migration helper input) ─────────────────────
+# List the ticker symbols you currently hold in each registered account.
+#
+# These lists are used only to seed the first portfolio_state.json file when it
+# does not exist yet. After migration, portfolio state is tracked in JSON.
+#
+# Rules applied when non-empty:
+#   • A ticker already listed here is labelled "already in portfolio" and
+#     skipped — no double-buying the same name.
+#   • A sector already covered by an existing holding is treated as full —
+#     new candidates in that sector are rejected to prevent watering-down.
+#   • The remaining open slots = max_positions − len(current holdings) so
+#     the model only fills the gaps you actually have.
+#
+# Update these lists after each purchase or sale.
+# Use Yahoo Finance ticker symbols (e.g. "RY.TO" for TSX, "MSFT" for NASDAQ).
+
+RRSP_CURRENT_HOLDINGS: List[str] = [
+    # "RY.TO",    # Royal Bank of Canada  — add tickers you already own
+    # "MSFT",     # Microsoft
+    # "ENB.TO",   # Enbridge
+    # "SPY",      # S&P 500 ETF
+]
+
+TFSA_CURRENT_HOLDINGS: List[str] = [
+    # "NVDA",     # NVIDIA  — add tickers you already own
+    # "SHOP.TO",  # Shopify
+    # "AMZN",     # Amazon
+]
