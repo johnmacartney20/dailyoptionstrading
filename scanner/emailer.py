@@ -956,7 +956,7 @@ def _weekly_options_section_html(options_weekly_summary: Dict[str, Any]) -> str:
     html += (
         f"<p class='meta'>Lookback: <strong>{lookback} days</strong>"
         f" &nbsp;|&nbsp; Entry score floor: <strong>{min_score:.1f}</strong>"
-        f" &nbsp;|&nbsp; Tracked high-conviction options: "
+        f" &nbsp;|&nbsp; Tracked high-conviction options (not total holdings): "
         f"<strong>{int((options_weekly_summary or {}).get('tracked_positions', 0))}</strong></p>"
     )
 

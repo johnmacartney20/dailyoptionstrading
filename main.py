@@ -87,6 +87,7 @@ from scanner.portfolio_state import (
     STATUS_FLAG,
     STATUS_HOLD,
     add_or_update_position,
+    backfill_legacy_holdings_in_state,
     build_position,
     get_holding_tickers,
     get_positions,
@@ -911,6 +912,22 @@ def _print_model_holdings_snapshot(state: dict) -> None:
     print("  MODEL HOLDINGS SNAPSHOT  —  Active Positions")
     print(sep)
 
+    non_cash_positions = [
+        p for p in positions if not bool((p.get("metadata", {}) or {}).get("is_cash", False))
+    ]
+    accounts = ["OPTIONS", "TFSA", "RRSP", "FHSA"]
+    by_account_non_cash = {
+        acct: sum(1 for p in non_cash_positions if str(p.get("account_type", "")).upper() == acct)
+        for acct in accounts
+    }
+    by_account_line = " | ".join(f"{acct}={by_account_non_cash.get(acct, 0)}" for acct in accounts)
+    print(
+        "  "
+        f"Total active positions: {len(positions)} | Non-cash holdings: {len(non_cash_positions)}"
+    )
+    print(f"  Non-cash holdings by account: {by_account_line}")
+    print("  Note: CASH.CAD rows are reserve placeholders, not equity/option holdings.")
+
     if not positions:
         print("  No active positions in state.")
         print(f"{sep}\n")
@@ -1315,7 +1332,7 @@ def _print_weekly_options_summary(summary: dict) -> None:
         "  "
         f"Lookback: {summary.get('lookback_days', 7)} days | "
         f"Entry score floor: {float(summary.get('min_entry_score', 0.0)):.1f} | "
-        f"Tracked positions: {int(summary.get('tracked_positions', 0))}"
+        f"Tracked option positions (not total holdings): {int(summary.get('tracked_positions', 0))}"
     )
 
     if not rows:
@@ -1537,10 +1554,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         tfsa_holdings=TFSA_CURRENT_HOLDINGS,
         fhsa_holdings=FHSA_CURRENT_HOLDINGS,
     )
+    backfilled = backfill_legacy_holdings_in_state(
+        state,
+        rrsp_holdings=RRSP_CURRENT_HOLDINGS,
+        tfsa_holdings=TFSA_CURRENT_HOLDINGS,
+        fhsa_holdings=FHSA_CURRENT_HOLDINGS,
+    )
     if seeded:
         logger.info(
             "Portfolio state %s created from legacy config holdings (initial run).",
             PORTFOLIO_STATE_FILE,
+        )
+    elif backfilled:
+        logger.info(
+            "Backfilled %d configured legacy holdings into existing state (RRSP/TFSA/FHSA).",
+            backfilled,
         )
 
     active_positions = get_positions(state, statuses=[STATUS_HOLD, STATUS_FLAG])

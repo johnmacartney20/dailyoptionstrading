@@ -240,6 +240,63 @@ def load_or_initialize_state(
     )
 
 
+def backfill_legacy_holdings_in_state(
+    state: Dict[str, Any],
+    rrsp_holdings: Sequence[str],
+    tfsa_holdings: Sequence[str],
+    fhsa_holdings: Optional[Sequence[str]] = None,
+) -> int:
+    """Inject configured legacy holdings into an existing in-memory state.
+
+    This is a migration safety net for users who already have a state file from
+    older runs. It ensures configured RRSP/TFSA/FHSA holdings are represented
+    in the active model state without requiring manual JSON edits.
+
+    Returns the number of positions added.
+    """
+    existing_keys = {
+        (
+            _normalize_ticker(pos.get("ticker", "")),
+            str(pos.get("account_type", "")).upper(),
+            str(pos.get("sub_portfolio", "")).lower(),
+        )
+        for pos in state.get("positions", [])
+    }
+
+    to_add = [
+        ("RRSP", "stability", rrsp_holdings, ["legacy-seed", "manual-holding", "rrsp"]),
+        ("TFSA", "growth", tfsa_holdings, ["legacy-seed", "manual-holding", "tfsa"]),
+        ("FHSA", "growth", fhsa_holdings or [], ["legacy-seed", "manual-holding", "fhsa"]),
+    ]
+
+    added = 0
+    for account_type, sub_portfolio, tickers, tags in to_add:
+        for ticker in tickers:
+            t = _normalize_ticker(ticker)
+            if not t:
+                continue
+            key = (t, account_type.upper(), sub_portfolio.lower())
+            if key in existing_keys:
+                continue
+            state.setdefault("positions", []).append(
+                _new_position(
+                    ticker=t,
+                    account_type=account_type,
+                    sub_portfolio=sub_portfolio,
+                    entry_date=_today_str(),
+                    entry_price=0.0,
+                    quantity=1,
+                    entry_composite_score=0.0,
+                    entry_thesis_tags=tags,
+                    status=STATUS_HOLD,
+                )
+            )
+            existing_keys.add(key)
+            added += 1
+
+    return added
+
+
 def get_positions(
     state: Dict[str, Any],
     account_type: Optional[str] = None,
