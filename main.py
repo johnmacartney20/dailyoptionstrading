@@ -44,6 +44,8 @@ from typing import List, Optional
 import pandas as pd
 
 from scanner.config import (
+    ACCOUNT_CAPITALS,
+    FHSA_CURRENT_HOLDINGS,
     NASDAQ_TICKERS,
     PORTFOLIO_STATE_FILE,
     PORTFOLIO_THRESHOLDS,
@@ -69,6 +71,7 @@ from scanner.holdings_reviewer import (
     review_holdings,
     review_summary,
     reviews_to_frame,
+    track_options_performance,
 )
 from scanner.portfolio_allocator import (
     PortfolioAllocation,
@@ -91,6 +94,7 @@ from scanner.portfolio_state import (
     move_exited_positions,
     portfolio_summary,
     save_portfolio_state,
+    weekly_options_performance_summary,
 )
 from scanner.risk import (
     add_position_sizing_columns,
@@ -232,6 +236,25 @@ def _tfsa_stock_to_df(tfsa_stock: TfsaStockPortfolio) -> pd.DataFrame:
     )
 
 
+def _fhsa_stock_to_df(fhsa_stock: TfsaStockPortfolio) -> pd.DataFrame:
+    if not getattr(fhsa_stock, "selected", None):
+        return pd.DataFrame()
+    return pd.DataFrame(
+        [
+            {
+                "ticker": t.ticker,
+                "sector": t.sector,
+                "price": t.current_price,
+                "score": t.composite_score,
+                "allocation": t.allocation,
+                "pct_of_portfolio": t.pct_of_portfolio,
+                "reasoning": t.reasoning,
+            }
+            for t in fhsa_stock.selected
+        ]
+    )
+
+
 def _rrsp_to_df(rrsp: RrspPortfolio) -> pd.DataFrame:
     if not getattr(rrsp, "selected", None):
         return pd.DataFrame()
@@ -261,7 +284,7 @@ def _print_holdings_review(reviews: List[HoldingReview]) -> None:
     print(sep)
 
     if not reviews:
-        print("  No active holdings to review.")
+        print("  No active non-cash holdings to review (portfolio may be all cash reserves).")
         print(f"{sep}\n")
         return
 
@@ -341,8 +364,29 @@ def _record_new_entries(
     tfsa_opts: TfsaAllocation,
     tfsa_stock: TfsaStockPortfolio,
     rrsp: RrspPortfolio,
+    fhsa_stock: TfsaStockPortfolio,
 ) -> None:
     """Write newly selected positions into persistent state."""
+    managed_keys = {
+        ("OPTIONS", "put-spread"),
+        ("TFSA", "long-call"),
+        ("TFSA", "growth"),
+        ("RRSP", "stability"),
+        ("FHSA", "growth"),
+    }
+    kept_positions = []
+    for pos in state.get("positions", []):
+        account = str(pos.get("account_type", "")).upper()
+        sub = str(pos.get("sub_portfolio", "")).lower()
+        metadata = pos.get("metadata", {}) or {}
+        if bool(metadata.get("is_cash", False)):
+            kept_positions.append(pos)
+            continue
+        if (account, sub) in managed_keys:
+            continue
+        kept_positions.append(pos)
+    state["positions"] = kept_positions
+
     for t in portfolio.selected:
         qty = max(int(t.allocation // max(t.max_loss, 1.0)), 1)
         add_or_update_position(
@@ -414,6 +458,91 @@ def _record_new_entries(
             ),
         )
 
+    for t in fhsa_stock.selected:
+        qty = max(int(t.allocation // max(t.current_price, 0.01)), 1)
+        add_or_update_position(
+            state,
+            build_position(
+                ticker=t.ticker,
+                account_type="FHSA",
+                sub_portfolio="growth",
+                entry_price=t.current_price,
+                quantity=qty,
+                entry_composite_score=t.composite_score,
+                entry_thesis_tags=_entry_tags_from_text(t.reasoning),
+            ),
+        )
+
+
+def _sync_account_cash_reserves(
+    state: dict,
+    non_registered_capital: float,
+    tfsa_capital: float,
+    rrsp_capital: float,
+    fhsa_capital: float,
+) -> None:
+    """Upsert synthetic cash reserve positions so account totals are explicit."""
+
+    def _account_noncash_book_value(account_type: str) -> float:
+        total = 0.0
+        for pos in state.get("positions", []):
+            if str(pos.get("account_type", "")).upper() != account_type.upper():
+                continue
+            metadata = pos.get("metadata", {}) or {}
+            if bool(metadata.get("is_cash", False)):
+                continue
+            qty = int(pos.get("quantity", 0) or 0)
+            px = float(pos.get("entry_price", 0.0) or 0.0)
+            total += qty * px
+        return total
+
+    cash_targets = [
+        (
+            "OPTIONS",
+            "cash-reserve",
+            max(float(non_registered_capital) - _account_noncash_book_value("OPTIONS"), 0.0),
+        ),
+        (
+            "TFSA",
+            "cash-reserve",
+            max(float(tfsa_capital) - _account_noncash_book_value("TFSA"), 0.0),
+        ),
+        (
+            "RRSP",
+            "cash-reserve",
+            max(float(rrsp_capital) - _account_noncash_book_value("RRSP"), 0.0),
+        ),
+        (
+            "FHSA",
+            "cash-reserve",
+            max(float(fhsa_capital) - _account_noncash_book_value("FHSA"), 0.0),
+        ),
+    ]
+
+    for account_type, sub_portfolio, cash_amt in cash_targets:
+        cash_qty = max(int(round(cash_amt)), 0)
+        add_or_update_position(
+            state,
+            {
+                "ticker": "CASH.CAD",
+                "account_type": account_type,
+                "sub_portfolio": sub_portfolio,
+                "entry_date": date.today().isoformat(),
+                "entry_price": 1.0,
+                "quantity": cash_qty,
+                "entry_composite_score": 100.0,
+                "entry_thesis_tags": ["cash", "reserve", "liquidity"],
+                "status": STATUS_HOLD,
+                "last_review_date": None,
+                "last_review_score": None,
+                "last_review_reason": "",
+                "review_history": [],
+                "metadata": {
+                    "is_cash": True,
+                    "cash_amount": round(cash_amt, 2),
+                },
+            },
+        )
 
 def scan_ticker(ticker: str) -> List[pd.DataFrame]:
     """Fetch and screen all qualifying options for *ticker*.
@@ -764,6 +893,469 @@ def _print_suggestions(suggestions: pd.DataFrame, top: int) -> None:
     print(f"{sep}\n")
 
 
+def _print_model_holdings_snapshot(state: dict) -> None:
+    """Print a concise snapshot of what the model currently believes is held."""
+    sep = "=" * 100
+    dash = "-" * 100
+
+    positions = sorted(
+        list(state.get("positions", [])),
+        key=lambda p: (
+            str(p.get("account_type", "")),
+            str(p.get("sub_portfolio", "")),
+            str(p.get("ticker", "")),
+        ),
+    )
+
+    print(f"\n{sep}")
+    print("  MODEL HOLDINGS SNAPSHOT  —  Active Positions")
+    print(sep)
+
+    if not positions:
+        print("  No active positions in state.")
+        print(f"{sep}\n")
+        return
+
+    headers = [
+        "Ticker", "Account", "Sub-Portfolio", "Qty", "Entry Date", "Entry", "Status", "Option", "Expiry",
+    ]
+    col_w = [8, 8, 14, 5, 10, 8, 8, 7, 10]
+    header_row = "  " + "  ".join(h.ljust(col_w[i]) for i, h in enumerate(headers))
+    print(header_row)
+    print("  " + dash[:len(header_row) - 2])
+
+    for pos in positions:
+        md = pos.get("metadata", {}) or {}
+        option_type = str(md.get("option_type", "")).upper() if md.get("option_type") else "-"
+        expiry = str(md.get("expiry", "")) if md.get("expiry") else "-"
+        row = [
+            str(pos.get("ticker", ""))[:8],
+            str(pos.get("account_type", ""))[:8],
+            str(pos.get("sub_portfolio", ""))[:14],
+            str(pos.get("quantity", 0)),
+            str(pos.get("entry_date", ""))[:10],
+            f"{float(pos.get('entry_price', 0.0) or 0.0):.2f}",
+            str(pos.get("status", ""))[:8],
+            option_type[:7],
+            expiry[:10],
+        ]
+        print("  " + "  ".join(str(v).ljust(col_w[i]) for i, v in enumerate(row)))
+
+    print(f"{sep}\n")
+
+
+def _print_options_performance(options_perf: pd.DataFrame) -> None:
+    """Pretty-print daily options mark-to-market performance."""
+    sep = "=" * 110
+    dash = "-" * 110
+
+    print(f"\n{sep}")
+    print("  OPTIONS PERFORMANCE  —  Daily Mark-to-Market")
+    print(sep)
+
+    if options_perf is None or options_perf.empty:
+        print("  No active option positions to track.")
+        print(f"{sep}\n")
+        return
+
+    display = options_perf.copy()
+    headers = [
+        "Ticker", "Acct", "Type", "Expiry", "Qty", "Entry", "Mark", "Day Δ", "P&L $", "Ret %", "DTE", "Note",
+    ]
+    col_w = [8, 6, 6, 10, 4, 7, 7, 7, 9, 7, 4, 28]
+    header_row = "  " + "  ".join(h.ljust(col_w[i]) for i, h in enumerate(headers))
+    print(header_row)
+    print("  " + dash[:len(header_row) - 2])
+
+    for _, r in display.iterrows():
+        entry = "-" if pd.isna(r.get("entry")) else f"{float(r.get('entry')):.2f}"
+        mark = "-" if pd.isna(r.get("mark")) else f"{float(r.get('mark')):.2f}"
+        day_change = "-" if pd.isna(r.get("daily_change")) else f"{float(r.get('daily_change')):+.2f}"
+        pnl = "-" if pd.isna(r.get("unrealized_pnl")) else f"{float(r.get('unrealized_pnl')):+.2f}"
+        ret_pct = "-" if pd.isna(r.get("return_pct")) else f"{float(r.get('return_pct')):+.1f}%"
+        dte = "-" if pd.isna(r.get("dte")) else str(int(r.get("dte")))
+        note = str(r.get("note", ""))[:28]
+        row = [
+            str(r.get("ticker", ""))[:8],
+            str(r.get("account", ""))[:6],
+            str(r.get("option_type", "")).upper()[:6],
+            str(r.get("expiry", ""))[:10],
+            str(int(r.get("qty", 0))) if not pd.isna(r.get("qty")) else "-",
+            entry,
+            mark,
+            day_change,
+            pnl,
+            ret_pct,
+            dte,
+            note,
+        ]
+        print("  " + "  ".join(str(v).ljust(col_w[i]) for i, v in enumerate(row)))
+
+    tracked = display[display["unrealized_pnl"].notna()]
+    total_pnl = float(tracked["unrealized_pnl"].sum()) if not tracked.empty else 0.0
+    print(f"\n  Total tracked options unrealized P&L: ${total_pnl:+,.2f}")
+    print(f"{sep}\n")
+
+
+def _print_compact_summary(
+    suggestions: pd.DataFrame,
+    portfolio: PortfolioAllocation,
+    tfsa_opts: TfsaAllocation,
+    tfsa_stock: TfsaStockPortfolio,
+    rrsp: RrspPortfolio,
+    fhsa_stock: TfsaStockPortfolio,
+    top: int,
+) -> None:
+    """Print a compact run summary with one small watchlist table."""
+    sep = "=" * 90
+    print(f"\n{sep}")
+    print("  RUN SUMMARY  —  Compact View")
+    print(sep)
+    print(f"  Qualifying options: {len(suggestions)}")
+    print(
+        "  Allocations: "
+        f"Options={portfolio.num_open_trades} (${portfolio.total_deployed:,.0f}), "
+        f"TFSA Calls={tfsa_opts.num_open_trades} (${tfsa_opts.total_deployed:,.0f}), "
+        f"TFSA Stocks={tfsa_stock.num_positions} (${tfsa_stock.total_deployed:,.0f}), "
+        f"RRSP={rrsp.num_positions} (${rrsp.total_deployed:,.0f}), "
+        f"FHSA={fhsa_stock.num_positions} (${fhsa_stock.total_deployed:,.0f})"
+    )
+
+    if suggestions is None or suggestions.empty:
+        print("  No option watchlist rows available.")
+        print(f"{sep}\n")
+        return
+
+    keep_cols = [
+        c
+        for c in ["ticker", "option_type", "expiry", "strike", "bid", "otm_pct", "score"]
+        if c in suggestions.columns
+    ]
+    watch = suggestions.sort_values("score", ascending=False).head(top)[keep_cols].copy()
+    if "otm_pct" in watch.columns:
+        watch["otm_pct"] = (watch["otm_pct"] * 100).round(1)
+    if "score" in watch.columns:
+        watch["score"] = watch["score"].round(1)
+
+    print("\n  Top Options Watchlist:")
+    try:
+        from tabulate import tabulate
+
+        print(tabulate(watch, headers="keys", tablefmt="simple", showindex=False))
+    except ImportError:
+        print(watch.to_string(index=False))
+    print(f"{sep}\n")
+
+
+def _position_book_value(pos: dict) -> float:
+    """Return approximate CAD book value for a state position."""
+    metadata = pos.get("metadata", {}) or {}
+    if bool(metadata.get("is_cash", False)):
+        return float(metadata.get("cash_amount", 0.0) or 0.0)
+    cad_equiv = metadata.get("cad_equiv")
+    if cad_equiv is not None:
+        try:
+            return float(cad_equiv)
+        except (TypeError, ValueError):
+            pass
+    return float(pos.get("entry_price", 0.0) or 0.0) * float(pos.get("quantity", 0.0) or 0.0)
+
+
+def _ticker_family_key(ticker: str) -> str:
+    """Normalize ticker variants so local/US listings can be compared together.
+
+    Example: TD and TD.TO share the same family key TD.
+    """
+    t = str(ticker or "").strip().upper()
+    if t.endswith(".TO"):
+        return t[:-3]
+    return t
+
+
+def _rebalance_actions_for_account(
+    state: dict,
+    account_type: str,
+    sub_portfolio: str,
+    capital: float,
+    target_rows: list[dict],
+) -> dict:
+    """Build buy/trim/sell suggestions for one account/sub-portfolio."""
+    current_positions = [
+        p
+        for p in state.get("positions", [])
+        if str(p.get("account_type", "")).upper() == account_type.upper()
+        and str(p.get("sub_portfolio", "")).lower() == sub_portfolio.lower()
+        and not bool((p.get("metadata", {}) or {}).get("is_cash", False))
+    ]
+
+    current_map: dict[str, float] = {}
+    current_labels: dict[str, set[str]] = {}
+    for p in current_positions:
+        raw_ticker = str(p.get("ticker", "")).upper()
+        key = _ticker_family_key(raw_ticker)
+        current_map[key] = current_map.get(key, 0.0) + _position_book_value(p)
+        current_labels.setdefault(key, set()).add(raw_ticker)
+
+    target_map: dict[str, float] = {}
+    target_labels: dict[str, set[str]] = {}
+    for r in target_rows:
+        raw_ticker = str(r.get("ticker", "")).upper()
+        key = _ticker_family_key(raw_ticker)
+        target_map[key] = target_map.get(key, 0.0) + float(r.get("allocation", 0.0) or 0.0)
+        target_labels.setdefault(key, set()).add(raw_ticker)
+
+    actions: list[dict] = []
+    all_keys = sorted(set(current_map) | set(target_map))
+    for key in all_keys:
+        cur_val = float(current_map.get(key, 0.0))
+        tgt_val = float(target_map.get(key, 0.0))
+        delta = tgt_val - cur_val
+        display_ticker = (
+            sorted(target_labels.get(key, set()))[:1]
+            or sorted(current_labels.get(key, set()))[:1]
+            or [key]
+        )[0]
+
+        if cur_val > 0 and tgt_val <= 0:
+            actions.append(
+                {
+                    "action": "SELL",
+                    "ticker": display_ticker,
+                    "current": cur_val,
+                    "target": tgt_val,
+                    "delta": -cur_val,
+                    "reason": "not in target portfolio",
+                }
+            )
+            continue
+
+        if cur_val <= 0 and tgt_val > 0:
+            actions.append(
+                {
+                    "action": "BUY",
+                    "ticker": display_ticker,
+                    "current": cur_val,
+                    "target": tgt_val,
+                    "delta": tgt_val,
+                    "reason": "new target position",
+                }
+            )
+            continue
+
+        tolerance = max(250.0, 0.05 * max(tgt_val, 1.0))
+        if abs(delta) <= tolerance:
+            actions.append(
+                {
+                    "action": "KEEP",
+                    "ticker": display_ticker,
+                    "current": cur_val,
+                    "target": tgt_val,
+                    "delta": delta,
+                    "reason": "within rebalance band",
+                }
+            )
+        elif delta > 0:
+            actions.append(
+                {
+                    "action": "BUY_MORE",
+                    "ticker": display_ticker,
+                    "current": cur_val,
+                    "target": tgt_val,
+                    "delta": delta,
+                    "reason": "below target allocation",
+                }
+            )
+        else:
+            actions.append(
+                {
+                    "action": "TRIM",
+                    "ticker": display_ticker,
+                    "current": cur_val,
+                    "target": tgt_val,
+                    "delta": delta,
+                    "reason": "above target allocation",
+                }
+            )
+
+    current_total = sum(current_map.values())
+    target_total = sum(target_map.values())
+    suggested_cash = max(capital - target_total, 0.0)
+    return {
+        "account": account_type,
+        "sub_portfolio": sub_portfolio,
+        "capital": capital,
+        "current_total": current_total,
+        "target_total": target_total,
+        "suggested_cash": suggested_cash,
+        "actions": actions,
+    }
+
+
+def _build_rebalance_plan(
+    state: dict,
+    portfolio: PortfolioAllocation,
+    tfsa_opts: TfsaAllocation,
+    tfsa_stock: TfsaStockPortfolio,
+    rrsp: RrspPortfolio,
+    fhsa_stock: TfsaStockPortfolio,
+) -> list[dict]:
+    """Build account-level rebalance plan from current state vs model targets."""
+    tfsa_targets = [
+        {"ticker": t.ticker, "allocation": t.allocation} for t in tfsa_stock.selected
+    ]
+    rrsp_targets = [
+        {"ticker": t.ticker, "allocation": t.allocation} for t in rrsp.selected
+    ]
+    fhsa_targets = [
+        {"ticker": t.ticker, "allocation": t.allocation} for t in fhsa_stock.selected
+    ]
+    nonreg_targets = [
+        {"ticker": t.ticker, "allocation": t.allocation} for t in portfolio.selected
+    ]
+    tfsa_option_targets = [
+        {"ticker": t.ticker, "allocation": t.allocation} for t in tfsa_opts.selected
+    ]
+
+    return [
+        _rebalance_actions_for_account(
+            state,
+            "OPTIONS",
+            "put-spread",
+            float(ACCOUNT_CAPITALS.get("NON_REGISTERED", 20_000.0)),
+            nonreg_targets,
+        ),
+        _rebalance_actions_for_account(
+            state,
+            "TFSA",
+            "long-call",
+            float(ACCOUNT_CAPITALS.get("TFSA", 65_000.0)),
+            tfsa_option_targets,
+        ),
+        _rebalance_actions_for_account(
+            state,
+            "TFSA",
+            "growth",
+            float(ACCOUNT_CAPITALS.get("TFSA", 65_000.0)),
+            tfsa_targets,
+        ),
+        _rebalance_actions_for_account(
+            state,
+            "RRSP",
+            "stability",
+            float(ACCOUNT_CAPITALS.get("RRSP", 25_000.0)),
+            rrsp_targets,
+        ),
+        _rebalance_actions_for_account(
+            state,
+            "FHSA",
+            "growth",
+            float(ACCOUNT_CAPITALS.get("FHSA", 35_000.0)),
+            fhsa_targets,
+        ),
+    ]
+
+
+def _print_rebalance_plan(plan: list[dict]) -> None:
+    """Print sell/trim/buy suggestions for full-portfolio rebalance."""
+    sep = "=" * 118
+    dash = "-" * 118
+    print(f"\n{sep}")
+    print("  REBALANCE PLAN  —  Sell / Trim / Buy Suggestions")
+    print(sep)
+
+    for account_plan in plan:
+        actions = list(account_plan.get("actions", []))
+        account = str(account_plan.get("account", ""))
+        sub = str(account_plan.get("sub_portfolio", ""))
+        capital = float(account_plan.get("capital", 0.0) or 0.0)
+        cur_total = float(account_plan.get("current_total", 0.0) or 0.0)
+        tgt_total = float(account_plan.get("target_total", 0.0) or 0.0)
+        suggested_cash = float(account_plan.get("suggested_cash", 0.0) or 0.0)
+
+        print(
+            f"\n  {account} / {sub}  | capital=${capital:,.0f}  "
+            f"current=${cur_total:,.0f}  target=${tgt_total:,.0f}  suggested_cash=${suggested_cash:,.0f}"
+        )
+        if not actions:
+            print("  No current or target positions in this sleeve.")
+            continue
+
+        priority = {"SELL": 0, "TRIM": 1, "BUY": 2, "BUY_MORE": 3, "KEEP": 4}
+        actions_sorted = sorted(actions, key=lambda a: (priority.get(str(a.get("action")), 9), str(a.get("ticker", ""))))
+
+        headers = ["Action", "Ticker", "Current $", "Target $", "Delta $", "Reason"]
+        col_w = [8, 8, 10, 10, 10, 38]
+        header_row = "  " + "  ".join(h.ljust(col_w[i]) for i, h in enumerate(headers))
+        print(header_row)
+        print("  " + dash[:len(header_row) - 2])
+        for a in actions_sorted:
+            row = [
+                str(a.get("action", ""))[:8],
+                str(a.get("ticker", ""))[:8],
+                f"{float(a.get('current', 0.0)):.0f}",
+                f"{float(a.get('target', 0.0)):.0f}",
+                f"{float(a.get('delta', 0.0)):+.0f}",
+                str(a.get("reason", ""))[:38],
+            ]
+            print("  " + "  ".join(str(v).ljust(col_w[i]) for i, v in enumerate(row)))
+
+    print(f"{sep}\n")
+
+
+def _print_weekly_options_summary(summary: dict) -> None:
+    """Print weekly high-conviction options performance summary."""
+    sep = "=" * 110
+    dash = "-" * 110
+    rows = list(summary.get("rows", []))
+
+    print(f"\n{sep}")
+    print("  WEEKLY OPTIONS PERFORMANCE  —  High-Conviction Trades")
+    print(sep)
+    print(
+        "  "
+        f"Lookback: {summary.get('lookback_days', 7)} days | "
+        f"Entry score floor: {float(summary.get('min_entry_score', 0.0)):.1f} | "
+        f"Tracked positions: {int(summary.get('tracked_positions', 0))}"
+    )
+
+    if not rows:
+        print("  No high-conviction options with performance history in the lookback window.")
+        print(f"{sep}\n")
+        return
+
+    headers = [
+        "Ticker", "Acct", "Type", "Expiry", "Qty", "EntryScr", "Start", "End", "Wk P&L", "Unrl P&L", "Wk Ret", "Days",
+    ]
+    col_w = [8, 6, 6, 10, 4, 8, 7, 7, 8, 10, 7, 4]
+    header_row = "  " + "  ".join(h.ljust(col_w[i]) for i, h in enumerate(headers))
+    print(header_row)
+    print("  " + dash[:len(header_row) - 2])
+
+    for r in rows:
+        row = [
+            str(r.get("ticker", ""))[:8],
+            str(r.get("account", ""))[:6],
+            str(r.get("option_type", "")).upper()[:6],
+            str(r.get("expiry", ""))[:10],
+            str(int(r.get("qty", 0))),
+            f"{float(r.get('entry_score', 0.0)):.1f}",
+            f"{float(r.get('start_mark', 0.0)):.2f}",
+            f"{float(r.get('end_mark', 0.0)):.2f}",
+            f"{float(r.get('weekly_pnl_change', 0.0)):+.0f}",
+            f"{float(r.get('unrealized_pnl', 0.0)):+.0f}",
+            f"{float(r.get('weekly_return_pct', 0.0)):+.1f}%",
+            str(int(r.get("days_captured", 0))),
+        ]
+        print("  " + "  ".join(str(v).ljust(col_w[i]) for i, v in enumerate(row)))
+
+    print(
+        "\n  "
+        f"Total weekly P&L change: ${float(summary.get('total_weekly_pnl_change', 0.0)):+,.2f} | "
+        f"Total unrealized P&L: ${float(summary.get('total_unrealized_pnl', 0.0)):+,.2f}"
+    )
+    print(f"{sep}\n")
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Scan TSX & NASDAQ for daily options trading suggestions.",
@@ -839,6 +1431,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--run-log",
         action="store_true",
         help="Enable writing run logs (CSV + JSON metadata).",
+    )
+    parser.add_argument(
+        "--verbose-tables",
+        action="store_true",
+        help="Print full detailed allocation/suggestion tables instead of compact output.",
+    )
+    parser.add_argument(
+        "--apply-targets",
+        action="store_true",
+        help="Apply target allocations to portfolio_state instead of suggestion-only mode.",
     )
     # ── Email options ──────────────────────────────────────────────────────────
     parser.add_argument(
@@ -933,6 +1535,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         state_path=PORTFOLIO_STATE_FILE,
         rrsp_holdings=RRSP_CURRENT_HOLDINGS,
         tfsa_holdings=TFSA_CURRENT_HOLDINGS,
+        fhsa_holdings=FHSA_CURRENT_HOLDINGS,
     )
     if seeded:
         logger.info(
@@ -950,6 +1553,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     apply_reviews_to_positions(active_positions, reviews)
     _print_holdings_review(reviews)
     move_exited_positions(state)
+    open_positions = get_positions(state, statuses=[STATUS_HOLD, STATUS_FLAG])
+    options_perf_df = track_options_performance(open_positions)
+    _print_model_holdings_snapshot(state)
+    _print_options_performance(options_perf_df)
 
     # ── Build ticker list ──────────────────────────────────────────────────────
     tickers: List[str] = []
@@ -982,7 +1589,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # ── Strategy filter ────────────────────────────────────────────────────────
     if args.strategy != "all":
-        suggestions = suggestions[suggestions["option_type"] == args.strategy]
+        if not suggestions.empty and "option_type" in suggestions.columns:
+            suggestions = suggestions[suggestions["option_type"] == args.strategy]
+        else:
+            suggestions = suggestions.iloc[0:0]
 
     # ── Optional risk controls / sizing ─────────────────────────────────────
     use_risk_controls = any(
@@ -1023,41 +1633,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         account_type="TFSA",
         statuses=[STATUS_HOLD, STATUS_FLAG],
     )
-
-    # ── Options portfolio allocation ───────────────────────────────────────────
-    # Both options allocations are independent — run them in parallel.
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        fut_portfolio = executor.submit(
-            allocate_portfolio,
-            suggestions,
-            existing_holdings=options_existing,
-            flagged_holdings_scores=_flagged_score_map(state, "OPTIONS", "put-spread"),
-            entry_score_min=entry_bar,
-            displacement_margin=displacement_margin,
-        )
-        fut_tfsa_opts = executor.submit(
-            allocate_tfsa_portfolio,
-            suggestions,
-            existing_holdings=tfsa_option_existing,
-            flagged_holdings_scores=_flagged_score_map(state, "TFSA", "long-call"),
-            entry_score_min=entry_bar,
-            displacement_margin=displacement_margin,
-        )
-        portfolio = fut_portfolio.result()
-        tfsa_opts = fut_tfsa_opts.result()
-
-    _print_portfolio_allocation(portfolio)
-    _print_tfsa_allocation(tfsa_opts)
-
-    # ── Stock-based TFSA (growth) & RRSP (stability) allocations ──────────────
-    logger.info("Fetching price histories for TFSA/RRSP stock scoring …")
-    tfsa_stock_histories = _fetch_price_histories(tickers)
-    rrsp_histories = _fetch_price_histories(RRSP_TICKERS)
-    logger.debug("SPY 20-day return used as market benchmark: %.2f%%", market_ret * 100)
-
     tfsa_stock_existing = get_holding_tickers(
         state,
         account_type="TFSA",
+        sub_portfolio="growth",
         statuses=[STATUS_HOLD, STATUS_FLAG],
     )
     rrsp_existing = get_holding_tickers(
@@ -1066,41 +1645,116 @@ def main(argv: Optional[List[str]] = None) -> int:
         sub_portfolio="stability",
         statuses=[STATUS_HOLD, STATUS_FLAG],
     )
+    fhsa_existing = get_holding_tickers(
+        state,
+        account_type="FHSA",
+        sub_portfolio="growth",
+        statuses=[STATUS_HOLD, STATUS_FLAG],
+    )
 
+    # ── Options portfolio allocation ───────────────────────────────────────────
+    # Both options allocations are independent — run them in parallel.
     with ThreadPoolExecutor(max_workers=2) as executor:
+        fut_portfolio = executor.submit(
+            allocate_portfolio,
+            suggestions,
+            total_capital=float(ACCOUNT_CAPITALS.get("NON_REGISTERED", 20_000.0)),
+            existing_holdings=[],
+            flagged_holdings_scores={},
+            entry_score_min=entry_bar,
+            displacement_margin=displacement_margin,
+        )
+        fut_tfsa_opts = executor.submit(
+            allocate_tfsa_portfolio,
+            suggestions,
+            total_capital=float(ACCOUNT_CAPITALS.get("TFSA", 65_000.0)),
+            max_trades=0,
+            existing_holdings=[],
+            flagged_holdings_scores={},
+            entry_score_min=entry_bar,
+            displacement_margin=displacement_margin,
+        )
+        portfolio = fut_portfolio.result()
+        tfsa_opts = fut_tfsa_opts.result()
+
+    if args.verbose_tables:
+        _print_portfolio_allocation(portfolio)
+        _print_tfsa_allocation(tfsa_opts)
+
+    # ── Stock-based TFSA (growth) & RRSP (stability) allocations ──────────────
+    logger.info("Fetching price histories for TFSA/RRSP/FHSA stock scoring …")
+    stock_universe = sorted(set(tickers) | set(tfsa_stock_existing) | set(rrsp_existing) | set(fhsa_existing))
+    tfsa_stock_histories = _fetch_price_histories(stock_universe)
+    rrsp_histories = _fetch_price_histories(RRSP_TICKERS)
+    logger.debug("SPY 20-day return used as market benchmark: %.2f%%", market_ret * 100)
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
         fut_tfsa_stock = executor.submit(
             allocate_tfsa_stock_portfolio,
             tfsa_stock_histories,
-            1000.0,
+            float(ACCOUNT_CAPITALS.get("TFSA", 65_000.0)),
             3,
             0.50,
             0.50,
             market_ret,
-            tfsa_stock_existing,
-            _flagged_score_map(state, "TFSA", "growth"),
+            [],
+            {},
             entry_bar,
             displacement_margin,
         )
         fut_rrsp = executor.submit(
             allocate_rrsp_portfolio,
             rrsp_histories,
-            1000.0,
+            float(ACCOUNT_CAPITALS.get("RRSP", 25_000.0)),
             3,
             0.50,
-            rrsp_existing,
-            _flagged_score_map(state, "RRSP", "stability"),
+            [],
+            {},
+            entry_bar,
+            displacement_margin,
+        )
+        fut_fhsa_stock = executor.submit(
+            allocate_tfsa_stock_portfolio,
+            tfsa_stock_histories,
+            float(ACCOUNT_CAPITALS.get("FHSA", 35_000.0)),
+            3,
+            0.50,
+            0.50,
+            market_ret,
+            [],
+            {},
             entry_bar,
             displacement_margin,
         )
         tfsa_stock = fut_tfsa_stock.result()
         rrsp = fut_rrsp.result()
+        fhsa_stock = fut_fhsa_stock.result()
 
-    _print_tfsa_stock_allocation(tfsa_stock)
-    _print_rrsp_allocation(rrsp)
-    _print_suggestions(suggestions, top=args.top)
+    if args.verbose_tables:
+        _print_tfsa_stock_allocation(tfsa_stock)
+        _print_rrsp_allocation(rrsp)
+        _print_suggestions(suggestions, top=args.top)
+    else:
+        _print_compact_summary(suggestions, portfolio, tfsa_opts, tfsa_stock, rrsp, fhsa_stock, args.top)
+
+    rebalance_plan = _build_rebalance_plan(state, portfolio, tfsa_opts, tfsa_stock, rrsp, fhsa_stock)
+    _print_rebalance_plan(rebalance_plan)
 
     # ── Persist state: add new entries after today's review/allocation ───────
-    _record_new_entries(state, portfolio, tfsa_opts, tfsa_stock, rrsp)
+    if args.apply_targets:
+        _record_new_entries(state, portfolio, tfsa_opts, tfsa_stock, rrsp, fhsa_stock)
+        _sync_account_cash_reserves(
+            state,
+            non_registered_capital=float(ACCOUNT_CAPITALS.get("NON_REGISTERED", 20_000.0)),
+            tfsa_capital=float(ACCOUNT_CAPITALS.get("TFSA", 65_000.0)),
+            rrsp_capital=float(ACCOUNT_CAPITALS.get("RRSP", 25_000.0)),
+            fhsa_capital=float(ACCOUNT_CAPITALS.get("FHSA", 35_000.0)),
+        )
+    else:
+        logger.info(
+            "Suggestion-only mode: state holdings were not replaced with target portfolio. "
+            "Use --apply-targets to persist the suggested rebalance."
+        )
     save_portfolio_state(state, PORTFOLIO_STATE_FILE)
     state_summary = portfolio_summary(state)
     reviews_df = reviews_to_frame(reviews)
@@ -1127,6 +1781,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             rrsp=rrsp,
             holdings_review=reviews_df,
             portfolio_state_summary=state_summary,
+            holdings_snapshot=pd.DataFrame(state.get("positions", [])),
+            options_performance=options_perf_df,
             entry_bar=entry_bar,
             rejected_candidates=rejected_candidates,
         )
@@ -1185,11 +1841,19 @@ def main(argv: Optional[List[str]] = None) -> int:
             weekly_tfsa_stock = fut_m_tfsa_stock.result()
             weekly_rrsp = fut_m_rrsp.result()
 
+        weekly_options_summary = weekly_options_performance_summary(
+            state,
+            min_entry_score=entry_bar,
+            lookback_days=7,
+        )
+        _print_weekly_options_summary(weekly_options_summary)
+
         weekly_html = build_weekly_portfolio_email(
             tfsa_stock=weekly_tfsa_stock,
             rrsp=weekly_rrsp,
             tfsa_capital=tfsa_capital,
             rrsp_capital=rrsp_capital,
+            options_weekly_summary=weekly_options_summary,
         )
         weekly_subject = (
             f"Weekly Portfolio Review — week ending {date.today().strftime('%B %d, %Y')}"
@@ -1216,6 +1880,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "tfsa_options": _tfsa_allocation_to_df(tfsa_opts),
                 "tfsa_stock": _tfsa_stock_to_df(tfsa_stock),
                 "rrsp": _rrsp_to_df(rrsp),
+                "fhsa_stock": _fhsa_stock_to_df(fhsa_stock),
+                "options_performance": options_perf_df,
             }
             meta_extra = {
                 "portfolio_manager": {

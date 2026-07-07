@@ -19,6 +19,8 @@ from .portfolio_state import STATUS_EXIT, STATUS_FLAG, STATUS_HOLD, record_revie
 
 logger = logging.getLogger(__name__)
 
+_OPTION_SUB_PORTFOLIOS = {"put-spread", "long-call"}
+
 
 @dataclass
 class HoldingReview:
@@ -145,6 +147,273 @@ def _score_position(position: Dict[str, Any], market_return_20d: float) -> Tuple
     return _score_stock_position(ticker=ticker, sub_portfolio=sub_portfolio, market_return_20d=market_return_20d)
 
 
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(val):
+        return None
+    return val
+
+
+def _mid_from_row(row: pd.Series) -> Optional[float]:
+    """Return a robust option mark using bid/ask midpoint fallback logic."""
+    bid = _safe_float(row.get("bid"))
+    ask = _safe_float(row.get("ask"))
+    last = _safe_float(row.get("lastPrice"))
+
+    if bid is not None and ask is not None and bid > 0 and ask > 0:
+        return (bid + ask) / 2.0
+    if bid is not None and bid > 0:
+        return bid
+    if ask is not None and ask > 0:
+        return ask
+    if last is not None and last > 0:
+        return last
+    return None
+
+
+def _nearest_strike_row(options_df: pd.DataFrame, strike: float) -> Optional[pd.Series]:
+    if options_df is None or options_df.empty or "strike" not in options_df.columns:
+        return None
+    strike_series = pd.to_numeric(options_df["strike"], errors="coerce")
+    diffs = (strike_series - float(strike)).abs()
+    if diffs.isna().all():
+        return None
+    idx = diffs.idxmin()
+    if pd.isna(idx):
+        return None
+    return options_df.loc[idx]
+
+
+def _days_to_expiry(expiry: str, as_of: date) -> Optional[int]:
+    if not expiry:
+        return None
+    try:
+        exp_dt = datetime.strptime(str(expiry), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    return max((exp_dt - as_of).days, 0)
+
+
+def track_options_performance(
+    positions: Sequence[Dict[str, Any]],
+    as_of: Optional[str] = None,
+) -> pd.DataFrame:
+    """Mark options positions to market and append one daily performance snapshot.
+
+    Mutates each position's ``metadata`` by updating ``performance_history`` and
+    last-known mark/P&L fields. Returns a report-friendly DataFrame.
+    """
+    as_of_date = date.today() if as_of is None else datetime.strptime(as_of, "%Y-%m-%d").date()
+    as_of_str = as_of_date.isoformat()
+
+    rows: List[Dict[str, Any]] = []
+    chain_cache: Dict[Tuple[str, str], Optional[Tuple[pd.DataFrame, pd.DataFrame]]] = {}
+    price_cache: Dict[str, Optional[float]] = {}
+
+    for pos in positions:
+        sub_portfolio = str(pos.get("sub_portfolio", "")).lower()
+        if sub_portfolio not in _OPTION_SUB_PORTFOLIOS:
+            continue
+
+        ticker = str(pos.get("ticker", "")).upper()
+        account = str(pos.get("account_type", ""))
+        status = str(pos.get("status", ""))
+        qty = int(max(int(pos.get("quantity", 1) or 1), 1))
+        entry_price = float(pos.get("entry_price", 0.0) or 0.0)
+
+        metadata = pos.setdefault("metadata", {})
+        option_type = str(metadata.get("option_type", "")).lower()
+        expiry = str(metadata.get("expiry", ""))
+        short_strike = _safe_float(metadata.get("strike"))
+        long_strike = _safe_float(metadata.get("long_strike"))
+
+        if not ticker or not option_type or not expiry or short_strike is None:
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "account": account,
+                    "sub_portfolio": sub_portfolio,
+                    "option_type": option_type,
+                    "expiry": expiry,
+                    "strike": short_strike,
+                    "long_strike": long_strike,
+                    "qty": qty,
+                    "entry": entry_price,
+                    "mark": None,
+                    "daily_change": None,
+                    "unrealized_pnl": None,
+                    "return_pct": None,
+                    "underlying": None,
+                    "dte": None,
+                    "status": status,
+                    "note": "missing option metadata",
+                }
+            )
+            continue
+
+        if ticker not in price_cache:
+            price_cache[ticker] = get_stock_price(ticker)
+        underlying = price_cache[ticker]
+
+        cache_key = (ticker, expiry)
+        if cache_key not in chain_cache:
+            chain_cache[cache_key] = get_options_chain(ticker, expiry)
+        chain = chain_cache[cache_key]
+        if chain is None:
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "account": account,
+                    "sub_portfolio": sub_portfolio,
+                    "option_type": option_type,
+                    "expiry": expiry,
+                    "strike": short_strike,
+                    "long_strike": long_strike,
+                    "qty": qty,
+                    "entry": round(entry_price, 4),
+                    "mark": None,
+                    "daily_change": None,
+                    "unrealized_pnl": None,
+                    "return_pct": None,
+                    "underlying": underlying,
+                    "dte": _days_to_expiry(expiry, as_of_date),
+                    "status": status,
+                    "note": "no options chain available",
+                }
+            )
+            continue
+
+        calls_df, puts_df = chain
+        options_df = calls_df if option_type == "call" else puts_df
+        short_row = _nearest_strike_row(options_df, short_strike)
+        if short_row is None:
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "account": account,
+                    "sub_portfolio": sub_portfolio,
+                    "option_type": option_type,
+                    "expiry": expiry,
+                    "strike": short_strike,
+                    "long_strike": long_strike,
+                    "qty": qty,
+                    "entry": round(entry_price, 4),
+                    "mark": None,
+                    "daily_change": None,
+                    "unrealized_pnl": None,
+                    "return_pct": None,
+                    "underlying": underlying,
+                    "dte": _days_to_expiry(expiry, as_of_date),
+                    "status": status,
+                    "note": "could not locate strike in options chain",
+                }
+            )
+            continue
+
+        short_mid = _mid_from_row(short_row)
+        if short_mid is None:
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "account": account,
+                    "sub_portfolio": sub_portfolio,
+                    "option_type": option_type,
+                    "expiry": expiry,
+                    "strike": short_strike,
+                    "long_strike": long_strike,
+                    "qty": qty,
+                    "entry": round(entry_price, 4),
+                    "mark": None,
+                    "daily_change": None,
+                    "unrealized_pnl": None,
+                    "return_pct": None,
+                    "underlying": underlying,
+                    "dte": _days_to_expiry(expiry, as_of_date),
+                    "status": status,
+                    "note": "missing bid/ask for strike",
+                }
+            )
+            continue
+
+        mark = float(short_mid)
+        note = "ok"
+        if sub_portfolio == "put-spread" and long_strike is not None:
+            long_row = _nearest_strike_row(options_df, long_strike)
+            long_mid = _mid_from_row(long_row) if long_row is not None else None
+            if long_mid is not None:
+                mark = max(short_mid - long_mid, 0.0)
+            else:
+                note = "long leg quote missing; using short-leg mark"
+
+        if sub_portfolio == "long-call":
+            pnl_per_contract = (mark - entry_price) * 100.0
+            basis = max(entry_price * 100.0, 1.0)
+        else:
+            pnl_per_contract = (entry_price - mark) * 100.0
+            basis = max(entry_price * 100.0, 1.0)
+
+        pnl_total = pnl_per_contract * qty
+        return_pct = (pnl_per_contract / basis) * 100.0
+
+        perf_hist = metadata.setdefault("performance_history", [])
+        prev_mark: Optional[float] = None
+        if perf_hist:
+            last = perf_hist[-1]
+            if str(last.get("date", "")) != as_of_str:
+                prev_mark = _safe_float(last.get("mark"))
+            else:
+                if len(perf_hist) >= 2:
+                    prev_mark = _safe_float(perf_hist[-2].get("mark"))
+                perf_hist.pop()
+        daily_change = None if prev_mark is None else (mark - prev_mark)
+
+        snapshot = {
+            "date": as_of_str,
+            "mark": round(mark, 4),
+            "daily_change": None if daily_change is None else round(daily_change, 4),
+            "pnl_per_contract": round(pnl_per_contract, 2),
+            "pnl_total": round(pnl_total, 2),
+            "return_pct": round(return_pct, 2),
+            "underlying": None if underlying is None else round(float(underlying), 4),
+            "dte": _days_to_expiry(expiry, as_of_date),
+            "status": status,
+        }
+        perf_hist.append(snapshot)
+        metadata["last_mark_date"] = as_of_str
+        metadata["last_mark"] = snapshot["mark"]
+        metadata["last_underlying_price"] = snapshot["underlying"]
+        metadata["last_option_pnl_total"] = snapshot["pnl_total"]
+        metadata["last_option_pnl_per_contract"] = snapshot["pnl_per_contract"]
+        metadata["last_option_return_pct"] = snapshot["return_pct"]
+
+        rows.append(
+            {
+                "ticker": ticker,
+                "account": account,
+                "sub_portfolio": sub_portfolio,
+                "option_type": option_type,
+                "expiry": expiry,
+                "strike": short_strike,
+                "long_strike": long_strike,
+                "qty": qty,
+                "entry": round(entry_price, 4),
+                "mark": snapshot["mark"],
+                "daily_change": snapshot["daily_change"],
+                "unrealized_pnl": snapshot["pnl_total"],
+                "return_pct": snapshot["return_pct"],
+                "underlying": snapshot["underlying"],
+                "dte": snapshot["dte"],
+                "status": status,
+                "note": note,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
 def _apply_thresholds(
     entry_score: float,
     current_score: float,
@@ -181,6 +450,10 @@ def review_holdings(
 
     reviews: List[HoldingReview] = []
     for pos in positions:
+        metadata = pos.get("metadata", {}) or {}
+        if bool(metadata.get("is_cash", False)):
+            continue
+
         ticker = str(pos.get("ticker", "")).upper()
         account = str(pos.get("account_type", ""))
         sub_portfolio = str(pos.get("sub_portfolio", ""))

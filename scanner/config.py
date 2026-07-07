@@ -140,6 +140,15 @@ PORTFOLIO_THRESHOLDS: Dict[str, float] = {
     "displacement_margin": 1.5,
 }
 
+# ── Account capital settings (used for allocation + sizing) ─────────────────
+# Keep these in sync with your real account balances.
+ACCOUNT_CAPITALS: Dict[str, float] = {
+    "NON_REGISTERED": 20_000.0,
+    "TFSA": 65_000.0,
+    "RRSP": 25_000.0,
+    "FHSA": 35_000.0,
+}
+
 # ── Legacy seeded holdings lists (migration helper input) ─────────────────────
 # List the ticker symbols you currently hold in each registered account.
 #
@@ -168,4 +177,9 @@ TFSA_CURRENT_HOLDINGS: List[str] = [
     # "NVDA",     # NVIDIA  — add tickers you already own
     # "SHOP.TO",  # Shopify
     # "AMZN",     # Amazon
+]
+
+FHSA_CURRENT_HOLDINGS: List[str] = [
+    # "AAPL",     # Apple
+    # "RY.TO",    # Royal Bank of Canada
 ]

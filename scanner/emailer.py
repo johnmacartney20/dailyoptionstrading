@@ -165,6 +165,129 @@ def _holdings_review_to_html(review_df: pd.DataFrame) -> str:
     return html
 
 
+def _holdings_snapshot_to_html(positions_df: pd.DataFrame) -> str:
+    """Render a compact table of active positions from portfolio state."""
+    html = '<div class="port-box">'
+    html += "<h2>📦 Model Holdings Snapshot (Active)</h2>"
+
+    if positions_df is None or positions_df.empty:
+        html += "<p>No active positions in portfolio state.</p></div>"
+        return html
+
+    display = positions_df.copy()
+    if "metadata" in display.columns:
+        display["option_type"] = display["metadata"].apply(
+            lambda m: (m or {}).get("option_type", "") if isinstance(m, dict) else ""
+        )
+        display["expiry"] = display["metadata"].apply(
+            lambda m: (m or {}).get("expiry", "") if isinstance(m, dict) else ""
+        )
+
+    cols = [
+        "ticker",
+        "account_type",
+        "sub_portfolio",
+        "quantity",
+        "entry_date",
+        "entry_price",
+        "status",
+        "option_type",
+        "expiry",
+    ]
+    keep = [c for c in cols if c in display.columns]
+    display = display[keep].copy()
+
+    rename = {
+        "ticker": "Ticker",
+        "account_type": "Account",
+        "sub_portfolio": "Sub-Portfolio",
+        "quantity": "Qty",
+        "entry_date": "Entry Date",
+        "entry_price": "Entry",
+        "status": "Status",
+        "option_type": "Option",
+        "expiry": "Expiry",
+    }
+    display.columns = [rename.get(c, c) for c in display.columns]
+
+    if "Entry" in display.columns:
+        display["Entry"] = pd.to_numeric(display["Entry"], errors="coerce").round(2)
+    if "Option" in display.columns:
+        display["Option"] = display["Option"].fillna("").astype(str).str.upper()
+
+    headers = "".join(f"<th>{h}</th>" for h in display.columns)
+    rows = ""
+    for _, row in display.iterrows():
+        cells = "".join(f"<td>{v}</td>" for v in row)
+        rows += f"<tr>{cells}</tr>"
+    html += f"<table><thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table>"
+    html += "</div>"
+    return html
+
+
+def _options_performance_to_html(options_df: pd.DataFrame) -> str:
+    """Render daily options mark-to-market performance table."""
+    html = '<div class="port-box">'
+    html += "<h2>📉 Options Performance (Daily Mark-to-Market)</h2>"
+
+    if options_df is None or options_df.empty:
+        html += "<p>No active option positions to track.</p></div>"
+        return html
+
+    cols = [
+        "ticker",
+        "account",
+        "option_type",
+        "expiry",
+        "qty",
+        "entry",
+        "mark",
+        "daily_change",
+        "unrealized_pnl",
+        "return_pct",
+        "dte",
+        "note",
+    ]
+    keep = [c for c in cols if c in options_df.columns]
+    display = options_df[keep].copy()
+
+    rename = {
+        "ticker": "Ticker",
+        "account": "Account",
+        "option_type": "Type",
+        "expiry": "Expiry",
+        "qty": "Qty",
+        "entry": "Entry",
+        "mark": "Mark",
+        "daily_change": "Day Δ",
+        "unrealized_pnl": "P&L $",
+        "return_pct": "Return %",
+        "dte": "DTE",
+        "note": "Note",
+    }
+    display.columns = [rename.get(c, c) for c in display.columns]
+
+    for col, decimals in [("Entry", 2), ("Mark", 2), ("Day Δ", 2), ("P&L $", 2), ("Return %", 2)]:
+        if col in display.columns:
+            display[col] = pd.to_numeric(display[col], errors="coerce").round(decimals)
+    if "Type" in display.columns:
+        display["Type"] = display["Type"].fillna("").astype(str).str.upper()
+
+    headers = "".join(f"<th>{h}</th>" for h in display.columns)
+    rows = ""
+    for _, row in display.iterrows():
+        cells = "".join(f"<td>{v}</td>" for v in row)
+        rows += f"<tr>{cells}</tr>"
+    html += f"<table><thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table>"
+
+    if "P&L $" in display.columns:
+        total = pd.to_numeric(display["P&L $"], errors="coerce").fillna(0.0).sum()
+        html += f"<p class='port-summary'>Total options unrealized P&amp;L: <strong>${total:+,.2f}</strong></p>"
+
+    html += "</div>"
+    return html
+
+
 def _entry_bar_candidates_to_html(
     suggestions: pd.DataFrame,
     entry_bar: float,
@@ -821,11 +944,97 @@ def _weekly_allocation_section_html(
     return html
 
 
+def _weekly_options_section_html(options_weekly_summary: Dict[str, Any]) -> str:
+    """Return HTML for weekly high-conviction options performance."""
+    html = '<div class="section-box">'
+    html += "<h2>🧠 Section 5 — High-Conviction Options Performance</h2>"
+
+    rows = list((options_weekly_summary or {}).get("rows", []))
+    lookback = int((options_weekly_summary or {}).get("lookback_days", 7))
+    min_score = float((options_weekly_summary or {}).get("min_entry_score", 0.0))
+
+    html += (
+        f"<p class='meta'>Lookback: <strong>{lookback} days</strong>"
+        f" &nbsp;|&nbsp; Entry score floor: <strong>{min_score:.1f}</strong>"
+        f" &nbsp;|&nbsp; Tracked high-conviction options: "
+        f"<strong>{int((options_weekly_summary or {}).get('tracked_positions', 0))}</strong></p>"
+    )
+
+    if not rows:
+        html += "<p>No high-conviction options had performance history in this window.</p>"
+        html += "</div>"
+        return html
+
+    df = pd.DataFrame(rows)
+    cols = [
+        "ticker",
+        "account",
+        "option_type",
+        "expiry",
+        "qty",
+        "entry_score",
+        "start_mark",
+        "end_mark",
+        "weekly_pnl_change",
+        "unrealized_pnl",
+        "weekly_return_pct",
+        "days_captured",
+    ]
+    keep = [c for c in cols if c in df.columns]
+    display = df[keep].copy()
+    rename = {
+        "ticker": "Ticker",
+        "account": "Account",
+        "option_type": "Type",
+        "expiry": "Expiry",
+        "qty": "Qty",
+        "entry_score": "Entry Score",
+        "start_mark": "Start Mark",
+        "end_mark": "End Mark",
+        "weekly_pnl_change": "Week P&L Δ",
+        "unrealized_pnl": "Unrealized P&L",
+        "weekly_return_pct": "Week Return %",
+        "days_captured": "Days",
+    }
+    display.columns = [rename.get(c, c) for c in display.columns]
+
+    for col, decimals in [
+        ("Entry Score", 1),
+        ("Start Mark", 2),
+        ("End Mark", 2),
+        ("Week P&L Δ", 2),
+        ("Unrealized P&L", 2),
+        ("Week Return %", 2),
+    ]:
+        if col in display.columns:
+            display[col] = pd.to_numeric(display[col], errors="coerce").round(decimals)
+    if "Type" in display.columns:
+        display["Type"] = display["Type"].fillna("").astype(str).str.upper()
+
+    headers = "".join(f"<th>{h}</th>" for h in display.columns)
+    rows_html = ""
+    for _, row in display.iterrows():
+        cells = "".join(f"<td>{v}</td>" for v in row)
+        rows_html += f"<tr>{cells}</tr>"
+    html += f"<table><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table>"
+
+    html += (
+        f"<p class='meta'>Total weekly P&amp;L change: "
+        f"<strong>${float(options_weekly_summary.get('total_weekly_pnl_change', 0.0)):+,.2f}</strong>"
+        f" &nbsp;|&nbsp; Total unrealized P&amp;L: "
+        f"<strong>${float(options_weekly_summary.get('total_unrealized_pnl', 0.0)):+,.2f}</strong></p>"
+    )
+
+    html += "</div>"
+    return html
+
+
 def build_weekly_portfolio_email(
     tfsa_stock: TfsaStockPortfolio,
     rrsp: RrspPortfolio,
     tfsa_capital: float = 25_000.0,
     rrsp_capital: float = 25_000.0,
+    options_weekly_summary: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Return a complete HTML email for the weekly TFSA + RRSP portfolio review.
 
@@ -837,8 +1046,10 @@ def build_weekly_portfolio_email(
        volatility and correlation commentary.
     3. **Portfolio Rebalance Strategy** — recommended adjustments and conviction
        narrative for TFSA (growth) and RRSP (stability) separately.
-    4. **Suggested Allocation for Next Week** — two tables (TFSA and RRSP) with
+     4. **Suggested Allocation for Next Week** — two tables (TFSA and RRSP) with
        ticker, sector, dollar allocation, portfolio %, and reasoning.
+     5. **High-Conviction Options Performance** — weekly mark/P&L table for
+         options entries that passed the conviction threshold.
 
     Parameters
     ----------
@@ -850,6 +1061,8 @@ def build_weekly_portfolio_email(
         Total TFSA capital (default $25,000).
     rrsp_capital:
         Total RRSP capital (default $25,000).
+    options_weekly_summary:
+        Optional dict generated from portfolio state performance history.
     """
     today = date.today()
     week_ending = today.strftime("%B %d, %Y")
@@ -866,6 +1079,8 @@ def build_weekly_portfolio_email(
     html += _weekly_insights_section_html(tfsa_stock, rrsp)
     html += _weekly_rebalance_section_html(tfsa_stock, rrsp)
     html += _weekly_allocation_section_html(tfsa_stock, rrsp, tfsa_capital, rrsp_capital)
+    if options_weekly_summary is not None:
+        html += _weekly_options_section_html(options_weekly_summary)
 
     html += _HTML_FOOT
     return html
@@ -881,6 +1096,8 @@ def build_html_email(
     rrsp: Optional[RrspPortfolio] = None,
     holdings_review: Optional[pd.DataFrame] = None,
     portfolio_state_summary: Optional[Dict[str, Any]] = None,
+    holdings_snapshot: Optional[pd.DataFrame] = None,
+    options_performance: Optional[pd.DataFrame] = None,
     entry_bar: float = 0.0,
     rejected_candidates: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
@@ -893,6 +1110,12 @@ def build_html_email(
 
     if holdings_review is not None:
         html += _holdings_review_to_html(holdings_review)
+
+    if holdings_snapshot is not None:
+        html += _holdings_snapshot_to_html(holdings_snapshot)
+
+    if options_performance is not None:
+        html += _options_performance_to_html(options_performance)
 
     if entry_bar > 0:
         html += _entry_bar_candidates_to_html(
@@ -915,13 +1138,10 @@ def build_html_email(
         html += _rrsp_to_html(rrsp)
 
     if suggestions is not None and not suggestions.empty and "option_type" in suggestions.columns:
-        for opt_type, label in _STRATEGY_LABELS.items():
-            sub = suggestions[suggestions["option_type"] == opt_type]
-            if sub.empty:
-                continue
-            html += f"<h2>{label}</h2>"
-            html += f"<p class='meta'>Showing top {min(len(sub), top)}</p>"
-            html += _df_to_html_table(sub, top)
+        ranked = suggestions.sort_values("score", ascending=False) if "score" in suggestions.columns else suggestions
+        html += "<h2>🎯 Top Options Watchlist</h2>"
+        html += f"<p class='meta'>Showing top {min(len(ranked), top)} by score</p>"
+        html += _df_to_html_table(ranked, top)
     else:
         html += "<h2>Daily Options Suggestions</h2>"
         html += "<p class='meta'>No qualifying options met filters today.</p>"
