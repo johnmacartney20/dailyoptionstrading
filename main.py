@@ -1373,6 +1373,26 @@ def _print_weekly_options_summary(summary: dict) -> None:
     print(f"{sep}\n")
 
 
+def _active_noncash_position_keys(state: dict) -> set[tuple[str, str, str]]:
+    """Return natural keys for active, non-cash positions."""
+    keys: set[tuple[str, str, str]] = set()
+    for pos in state.get("positions", []):
+        status = str(pos.get("status", "")).upper()
+        if status not in {STATUS_HOLD, STATUS_FLAG}:
+            continue
+        metadata = pos.get("metadata", {}) or {}
+        if bool(metadata.get("is_cash", False)):
+            continue
+        keys.add(
+            (
+                str(pos.get("ticker", "")).upper(),
+                str(pos.get("account_type", "")).upper(),
+                str(pos.get("sub_portfolio", "")).lower(),
+            )
+        )
+    return keys
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Scan TSX & NASDAQ for daily options trading suggestions.",
@@ -1769,7 +1789,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     _print_rebalance_plan(rebalance_plan)
 
     # ── Persist state: add new entries after today's review/allocation ───────
+    entered_trades_count = 0
     if args.apply_targets:
+        pre_apply_keys = _active_noncash_position_keys(state)
         _record_new_entries(state, portfolio, tfsa_opts, tfsa_stock, rrsp, fhsa_stock)
         _sync_account_cash_reserves(
             state,
@@ -1778,6 +1800,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             rrsp_capital=float(ACCOUNT_CAPITALS.get("RRSP", 25_000.0)),
             fhsa_capital=float(ACCOUNT_CAPITALS.get("FHSA", 35_000.0)),
         )
+        post_apply_keys = _active_noncash_position_keys(state)
+        entered_trades_count = len(post_apply_keys - pre_apply_keys)
     else:
         logger.info(
             "Suggestion-only mode: state holdings were not replaced with target portfolio. "
@@ -1809,10 +1833,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             rrsp=rrsp,
             holdings_review=reviews_df,
             portfolio_state_summary=state_summary,
-            holdings_snapshot=pd.DataFrame(state.get("positions", [])),
             options_performance=options_perf_df,
-            entry_bar=entry_bar,
             rejected_candidates=rejected_candidates,
+            entered_trades_count=entered_trades_count,
         )
         try:
             send_email(

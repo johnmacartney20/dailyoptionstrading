@@ -15,6 +15,7 @@ Environment variables (all optional; can also be passed directly):
 import logging
 import os
 import smtplib
+from collections import Counter
 from datetime import date
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -42,6 +43,15 @@ _HTML_HEAD = """<!DOCTYPE html>
   tr:nth-child(even) td {{ background: #f2f2f2; }}
   .meta {{ color: #555; font-size: 12px; }}
   .disc {{ font-size: 11px; color: #888; margin-top: 20px; border-top: 1px solid #ccc; padding-top: 8px; }}
+    .daily-action {{ background: #fff7e6; border: 1px solid #d4a017; border-radius: 6px; padding: 14px 16px; margin-bottom: 14px; }}
+    .daily-action h2 {{ color: #8a6100; border-bottom-color: #d4a017; margin-top: 0; }}
+    .action-line {{ font-size: 13px; margin: 6px 0; }}
+    .action-list {{ margin: 6px 0 0 18px; }}
+    .action-list li {{ margin: 3px 0; }}
+    .compact-table {{ font-size: 12px; }}
+    .compact-table th {{ font-size: 11px; }}
+    .compact-table td {{ font-size: 12px; }}
+    .compact-note {{ font-size: 12px; color: #555; margin: 6px 0 0 0; }}
   .port-box {{ background: #eaf4fb; border: 1px solid #1a5276; border-radius: 4px; padding: 12px 16px; margin-bottom: 20px; }}
   .port-summary {{ font-size: 12px; color: #333; margin-bottom: 8px; }}
   .port-summary strong {{ color: #1a5276; }}
@@ -83,6 +93,8 @@ _STRATEGY_LABELS = {
     "put": "Cash-Secured Puts (sell put, set aside cash)",
 }
 
+_DAILY_REVIEW_DELTA_THRESHOLD = 15.0
+
 # Columns to include in the email table and their display names.
 _EMAIL_COLUMNS = {
     "ticker": "Ticker",
@@ -117,6 +129,262 @@ def _portfolio_summary_to_html(summary: Dict[str, Any]) -> str:
         f"<p class='port-summary'>By account: {' | '.join(account_parts) if account_parts else 'n/a'}</p>"
         f"<p class='port-summary'>Today verdicts: {' | '.join(status_parts) if status_parts else 'n/a'}</p>"
     )
+    html += "</div>"
+    return html
+
+
+def _sum_numeric_column(frame: Optional[pd.DataFrame], column: str) -> float:
+    if frame is None or frame.empty or column not in frame.columns:
+        return 0.0
+    return float(pd.to_numeric(frame[column], errors="coerce").fillna(0.0).sum())
+
+
+def _combined_allocation_rows(
+    portfolio: Optional[PortfolioAllocation],
+    tfsa_allocation: Optional[TfsaAllocation],
+    tfsa_stock: Optional[TfsaStockPortfolio],
+    rrsp: Optional[RrspPortfolio],
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+
+    if portfolio is not None:
+        for item in getattr(portfolio, "selected", []) or []:
+            rows.append(
+                {
+                    "ticker": item.ticker,
+                    "account": "OPTIONS",
+                    "action": "Sell put spread",
+                    "allocation_pct": item.pct_of_portfolio,
+                    "allocation": item.allocation,
+                }
+            )
+
+    if tfsa_allocation is not None:
+        for item in getattr(tfsa_allocation, "selected", []) or []:
+            rows.append(
+                {
+                    "ticker": item.ticker,
+                    "account": "TFSA",
+                    "action": "Buy long call",
+                    "allocation_pct": item.pct_of_portfolio,
+                    "allocation": item.allocation,
+                }
+            )
+
+    if tfsa_stock is not None:
+        for item in getattr(tfsa_stock, "selected", []) or []:
+            rows.append(
+                {
+                    "ticker": item.ticker,
+                    "account": "TFSA",
+                    "action": "Buy stock",
+                    "allocation_pct": item.pct_of_portfolio,
+                    "allocation": item.allocation,
+                }
+            )
+
+    if rrsp is not None:
+        for item in getattr(rrsp, "selected", []) or []:
+            rows.append(
+                {
+                    "ticker": item.ticker,
+                    "account": "RRSP",
+                    "action": "Buy stock",
+                    "allocation_pct": item.pct_of_portfolio,
+                    "allocation": item.allocation,
+                }
+            )
+
+    return rows
+
+
+def _allocation_breakdown(rows: List[Dict[str, Any]]) -> str:
+    if not rows:
+        return ""
+    counts = Counter(str(row.get("account", "")) for row in rows)
+    parts = [f"{account} {count}" for account, count in sorted(counts.items()) if account]
+    return ", ".join(parts)
+
+
+def _combined_allocation_table_html(rows: List[Dict[str, Any]]) -> str:
+    if not rows:
+        return "<p>No new allocations selected today.</p>"
+
+    display = pd.DataFrame(rows)[["ticker", "account", "action", "allocation_pct", "allocation"]].copy()
+    display.columns = ["Ticker", "Account", "Action", "Allocation %", "Allocation $"]
+    display["Allocation %"] = pd.to_numeric(display["Allocation %"], errors="coerce").fillna(0.0).round(1)
+    display["Allocation $"] = pd.to_numeric(display["Allocation $"] , errors="coerce").fillna(0.0).round(2)
+    display["Allocation %"] = display["Allocation %"].map(lambda value: f"{value:.1f}%")
+    display["Allocation $"] = display["Allocation $"].map(lambda value: f"${value:,.2f}")
+
+    headers = "".join(f"<th>{heading}</th>" for heading in display.columns)
+    rows_html = ""
+    for _, row in display.iterrows():
+        rows_html += "<tr>" + "".join(f"<td>{value}</td>" for value in row) + "</tr>"
+
+    return f'<table class="compact-table"><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table>'
+
+
+def _grouped_rejected_candidates_html(rejected_candidates: Optional[List[Dict[str, Any]]]) -> str:
+    if not rejected_candidates:
+        return ""
+
+    grouped: Dict[str, Counter] = {}
+    for item in rejected_candidates:
+        ticker = str(item.get("ticker", "")).upper() or "UNKNOWN"
+        reason = str(item.get("reason", "")).strip() or "No reason provided"
+        grouped.setdefault(ticker, Counter())[reason] += 1
+
+    lines = ["<p class='compact-note'>Grouped by ticker + reason.</p><ul class='action-list'>"]
+    for ticker, reasons in sorted(grouped.items(), key=lambda item: item[0]):
+        total = int(sum(reasons.values()))
+        reason_summary = ", ".join(
+            f"{count} {reason}" for reason, count in reasons.most_common()
+        )
+        lines.append(
+            f"<li><strong>{ticker}</strong>: {total} candidates rejected ({reason_summary}).</li>"
+        )
+    lines.append("</ul>")
+    return "".join(lines)
+
+
+def _collapsed_holdings_review_html(
+    review_df: Optional[pd.DataFrame],
+    delta_threshold: float,
+) -> str:
+    if review_df is None or review_df.empty:
+        return "<p>No active holdings to review today.</p>"
+
+    df = review_df.copy()
+    if "score_delta" not in df.columns:
+        df["score_delta"] = 0.0
+    if "verdict" not in df.columns:
+        df["verdict"] = ""
+
+    verdicts = df["verdict"].astype(str).str.upper()
+    deltas = pd.to_numeric(df["score_delta"], errors="coerce").fillna(0.0).abs()
+    noteworthy = df[(verdicts != "HOLD") | (deltas > delta_threshold)].copy()
+
+    total = len(df)
+    noteworthy_count = len(noteworthy)
+    holds = int((verdicts == "HOLD").sum())
+    exit_count = int((verdicts == "EXIT").sum())
+    flag_count = int((verdicts == "FLAG").sum())
+    large_delta_count = max(noteworthy_count - exit_count - flag_count, 0)
+
+    body = (
+        f"<p class='compact-note'>{total} holdings reviewed, {noteworthy_count} noteworthy rows, "
+        f"{holds} HOLD.</p>"
+    )
+
+    if noteworthy.empty:
+        body += "<p>No rows exceeded the action threshold.</p>"
+        return body
+
+    display = noteworthy[[c for c in [
+        "ticker", "account", "sub_portfolio", "entry_score", "current_score",
+        "score_delta", "days_held", "verdict", "reason",
+    ] if c in noteworthy.columns]].copy()
+    rename = {
+        "ticker": "Ticker",
+        "account": "Account",
+        "sub_portfolio": "Sub-Portfolio",
+        "entry_score": "Entry Score",
+        "current_score": "Current Score",
+        "score_delta": "Delta",
+        "days_held": "Days Held",
+        "verdict": "Verdict",
+        "reason": "Reason",
+    }
+    display.columns = [rename.get(column, column) for column in display.columns]
+    for column in ["Entry Score", "Current Score", "Delta"]:
+        if column in display.columns:
+            display[column] = pd.to_numeric(display[column], errors="coerce").fillna(0.0).round(2)
+
+    headers = "".join(f"<th>{heading}</th>" for heading in display.columns)
+    rows_html = ""
+    for _, row in display.iterrows():
+        rows_html += "<tr>" + "".join(f"<td>{value}</td>" for value in row) + "</tr>"
+
+    body += (
+        f"<p class='compact-note'>EXIT: {exit_count} | FLAG: {flag_count} | "
+        f"|Δ| &gt; {delta_threshold:.0f}: {large_delta_count}</p>"
+    )
+    body += f'<table class="compact-table"><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table>'
+    return body
+
+
+def _visible_section(title: str, body_html: str) -> str:
+    return (
+        '<div class="port-box">'
+        f'<details><summary><strong>{title}</strong></summary>{body_html}</details>'
+        '</div>'
+    )
+
+
+def _render_daily_action_summary(
+    holdings_review: Optional[pd.DataFrame],
+    portfolio_state_summary: Optional[Dict[str, Any]],
+    portfolio: Optional[PortfolioAllocation],
+    tfsa_allocation: Optional[TfsaAllocation],
+    tfsa_stock: Optional[TfsaStockPortfolio],
+    rrsp: Optional[RrspPortfolio],
+    options_performance: Optional[pd.DataFrame],
+    entered_trades_count: Optional[int] = None,
+) -> str:
+    review_df = holdings_review.copy() if holdings_review is not None else pd.DataFrame()
+    total_reviewed = len(review_df)
+    if total_reviewed == 0 and portfolio_state_summary is not None:
+        total_reviewed = int(portfolio_state_summary.get("total_positions", 0))
+
+    holds = 0
+    exits = 0
+    flags = 0
+    exit_flag_rows = pd.DataFrame()
+
+    if not review_df.empty and "verdict" in review_df.columns:
+        verdicts = review_df["verdict"].astype(str).str.upper()
+        holds = int((verdicts == "HOLD").sum())
+        exits = int((verdicts == "EXIT").sum())
+        flags = int((verdicts == "FLAG").sum())
+        exit_flag_rows = review_df.loc[verdicts.isin(["EXIT", "FLAG"])].copy()
+    elif total_reviewed > 0 and portfolio_state_summary is not None:
+        by_status = portfolio_state_summary.get("by_status", {}) or {}
+        holds = int(by_status.get("HOLD", 0) or 0)
+        exits = int(by_status.get("EXIT", 0) or 0)
+        flags = int(by_status.get("FLAG", 0) or 0)
+
+    allocation_rows = _combined_allocation_rows(portfolio, tfsa_allocation, tfsa_stock, rrsp)
+    new_trades = int(entered_trades_count) if entered_trades_count is not None else len(allocation_rows)
+    trade_breakdown = _allocation_breakdown(allocation_rows)
+    total_pnl = _sum_numeric_column(options_performance, "unrealized_pnl")
+
+    html = '<div class="daily-action">'
+    html += '<h2>Action Summary</h2>'
+
+    if total_reviewed > 0 and holds == total_reviewed and exits == 0 and flags == 0:
+        html += f'<p class="action-line">{holds}/{total_reviewed} HOLD, no action needed</p>'
+    elif total_reviewed > 0:
+        html += f'<p class="action-line">{exits + flags} actionable review(s) from {total_reviewed} holdings</p>'
+        if not exit_flag_rows.empty:
+            html += '<ul class="action-list">'
+            for _, row in exit_flag_rows.iterrows():
+                ticker = str(row.get("ticker", ""))
+                verdict = str(row.get("verdict", "")).upper()
+                delta = float(row.get("score_delta", 0.0) or 0.0)
+                reason = str(row.get("reason", "")).strip()
+                reason_short = reason[:120] + ("…" if len(reason) > 120 else "") if reason else ""
+                html += f"<li><strong>{ticker}</strong> {verdict} (Δ {delta:+.1f})"
+                if reason_short:
+                    html += f" — {reason_short}"
+                html += "</li>"
+            html += "</ul>"
+
+    html += f'<p class="action-line">New trades entered: <strong>{new_trades}</strong>'
+    if trade_breakdown:
+        html += f" <span class='compact-note'>({trade_breakdown})</span>"
+    html += "</p>"
+    html += f'<p class="action-line">Total P&amp;L: <strong>${total_pnl:+,.2f}</strong></p>'
     html += "</div>"
     return html
 
@@ -226,12 +494,11 @@ def _holdings_snapshot_to_html(positions_df: pd.DataFrame) -> str:
 
 
 def _options_performance_to_html(options_df: pd.DataFrame) -> str:
-    """Render daily options mark-to-market performance table."""
-    html = '<div class="port-box">'
-    html += "<h2>📉 Options Performance (Daily Mark-to-Market)</h2>"
+    """Render daily options mark-to-market performance table body."""
+    html = ""
 
     if options_df is None or options_df.empty:
-        html += "<p>No active option positions to track.</p></div>"
+        html += "<p>No active option positions to track.</p>"
         return html
 
     cols = [
@@ -284,7 +551,6 @@ def _options_performance_to_html(options_df: pd.DataFrame) -> str:
         total = pd.to_numeric(display["P&L $"], errors="coerce").fillna(0.0).sum()
         html += f"<p class='port-summary'>Total options unrealized P&amp;L: <strong>${total:+,.2f}</strong></p>"
 
-    html += "</div>"
     return html
 
 
@@ -1096,55 +1362,65 @@ def build_html_email(
     rrsp: Optional[RrspPortfolio] = None,
     holdings_review: Optional[pd.DataFrame] = None,
     portfolio_state_summary: Optional[Dict[str, Any]] = None,
-    holdings_snapshot: Optional[pd.DataFrame] = None,
     options_performance: Optional[pd.DataFrame] = None,
-    entry_bar: float = 0.0,
     rejected_candidates: Optional[List[Dict[str, Any]]] = None,
+    entered_trades_count: Optional[int] = None,
 ) -> str:
     """Return a complete HTML email string for the given *suggestions* DataFrame."""
     today = date.today().strftime("%Y-%m-%d")
     html = _HTML_HEAD.format(date=today, exchange=exchange.upper(), total=len(suggestions))
 
-    if portfolio_state_summary is not None:
-        html += _portfolio_summary_to_html(portfolio_state_summary)
+    html += _render_daily_action_summary(
+        holdings_review=holdings_review,
+        portfolio_state_summary=portfolio_state_summary,
+        portfolio=portfolio,
+        tfsa_allocation=tfsa_allocation,
+        tfsa_stock=tfsa_stock,
+        rrsp=rrsp,
+        options_performance=options_performance,
+        entered_trades_count=entered_trades_count,
+    )
 
     if holdings_review is not None:
-        html += _holdings_review_to_html(holdings_review)
-
-    if holdings_snapshot is not None:
-        html += _holdings_snapshot_to_html(holdings_snapshot)
+        holdings_body = _collapsed_holdings_review_html(
+            holdings_review,
+            _DAILY_REVIEW_DELTA_THRESHOLD,
+        )
+        html += _visible_section("Holdings Review", holdings_body)
 
     if options_performance is not None:
-        html += _options_performance_to_html(options_performance)
-
-    if entry_bar > 0:
-        html += _entry_bar_candidates_to_html(
-            suggestions=suggestions,
-            entry_bar=entry_bar,
-            rejected_candidates=rejected_candidates,
-            top=top,
+        html += _visible_section(
+            "Options Performance",
+            _options_performance_to_html(options_performance),
         )
 
-    if portfolio is not None:
-        html += _portfolio_to_html(portfolio)
+    allocation_rows = _combined_allocation_rows(portfolio, tfsa_allocation, tfsa_stock, rrsp)
+    html += _visible_section(
+        "Portfolio Actions",
+        (
+            "<p class='compact-note'>Ticker, account, action, and allocation percent are grouped into one table.</p>"
+            + _combined_allocation_table_html(allocation_rows)
+        ),
+    )
 
-    if tfsa_allocation is not None:
-        html += _tfsa_allocation_to_html(tfsa_allocation)
-
-    if tfsa_stock is not None:
-        html += _tfsa_stock_to_html(tfsa_stock)
-
-    if rrsp is not None:
-        html += _rrsp_to_html(rrsp)
+    grouped_rejections = _grouped_rejected_candidates_html(rejected_candidates)
+    if grouped_rejections:
+        html += _visible_section(
+            "Passed / Deferred Candidates",
+            grouped_rejections,
+        )
 
     if suggestions is not None and not suggestions.empty and "option_type" in suggestions.columns:
         ranked = suggestions.sort_values("score", ascending=False) if "score" in suggestions.columns else suggestions
-        html += "<h2>🎯 Top Options Watchlist</h2>"
-        html += f"<p class='meta'>Showing top {min(len(ranked), top)} by score</p>"
-        html += _df_to_html_table(ranked, top)
+        html += _visible_section(
+            "Top Options Watchlist",
+            f"<p class='compact-note'>Showing top {min(len(ranked), top)} by score.</p>" + _df_to_html_table(ranked, top),
+        )
     else:
-        html += "<h2>Daily Options Suggestions</h2>"
-        html += "<p class='meta'>No qualifying options met filters today.</p>"
+        html += _visible_section(
+            "Top Options Watchlist",
+            "<p class='compact-note'>No qualifying options met filters today.</p>",
+        )
 
     html += _HTML_FOOT
     return html
