@@ -347,7 +347,7 @@
       "ticker": "VFV"
     }
   ],
-  "generated_at": "2026-07-08T23:29:24Z",
+  "generated_at": "2026-07-08T23:44:43Z",
   "positions": [
     {
       "account_type": "FHSA",
@@ -528,6 +528,12 @@
           "reason": "score 31.20 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (67%) penalised; strong liquidity",
           "score": 31.2,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-07-08",
+          "reason": "score 31.20 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (67%) penalised; strong liquidity",
+          "score": 31.2,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -588,6 +594,12 @@
           "date": "2026-07-08",
           "reason": "score 54.48 above hold floor 6.00; above 20MA; below 50MA; lagging market; strong liquidity",
           "score": 54.48,
+          "status": "HOLD"
+        },
+        {
+          "date": "2026-07-08",
+          "reason": "score 54.29 above hold floor 6.00; above 20MA; below 50MA; lagging market; strong liquidity",
+          "score": 54.29,
           "status": "HOLD"
         },
         {
@@ -686,6 +698,12 @@
           "reason": "score 54.08 above hold floor 6.00; above 20MA; below 50MA; lagging market; strong liquidity",
           "score": 54.08,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-07-08",
+          "reason": "score 54.08 above hold floor 6.00; above 20MA; below 50MA; lagging market; strong liquidity",
+          "score": 54.08,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -745,6 +763,12 @@
         {
           "date": "2026-07-08",
           "reason": "score 30.00 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (222%) penalised; strong liquidity",
+          "score": 30.0,
+          "status": "HOLD"
+        },
+        {
+          "date": "2026-07-08",
+          "reason": "score 30.00 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (223%) penalised; strong liquidity",
           "score": 30.0,
           "status": "HOLD"
         },
@@ -844,6 +868,12 @@
           "reason": "score 63.84 above hold floor 6.00; below 20MA; above 50MA; low vol (17%); strong liquidity",
           "score": 63.84,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-07-08",
+          "reason": "score 63.84 above hold floor 6.00; below 20MA; above 50MA; low vol (17%); strong liquidity",
+          "score": 63.84,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -897,6 +927,12 @@
         {
           "date": "2026-07-07",
           "reason": "score 35.00 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (92%) penalised; strong liquidity",
+          "score": 35.0,
+          "status": "HOLD"
+        },
+        {
+          "date": "2026-07-08",
+          "reason": "score 35.00 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (90%) penalised; strong liquidity",
           "score": 35.0,
           "status": "HOLD"
         },
@@ -1002,6 +1038,12 @@
           "reason": "score 67.43 above hold floor 6.00; above 20MA; above 50MA; low vol (19%); strong liquidity",
           "score": 67.43,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-07-08",
+          "reason": "score 67.43 above hold floor 6.00; above 20MA; above 50MA; low vol (19%); strong liquidity",
+          "score": 67.43,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -1062,6 +1104,12 @@
           "date": "2026-07-08",
           "reason": "score 42.27 above hold floor 6.00; above 20MA; below 50MA; lagging market; low vol (23%)",
           "score": 42.27,
+          "status": "HOLD"
+        },
+        {
+          "date": "2026-07-08",
+          "reason": "score 42.25 above hold floor 6.00; above 20MA; below 50MA; lagging market; low vol (23%)",
+          "score": 42.25,
           "status": "HOLD"
         },
         {
