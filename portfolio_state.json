@@ -347,7 +347,7 @@
       "ticker": "VFV"
     }
   ],
-  "generated_at": "2026-07-09T23:33:27Z",
+  "generated_at": "2026-07-09T23:55:05Z",
   "positions": [
     {
       "account_type": "FHSA",
@@ -552,6 +552,12 @@
           "reason": "score 31.13 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (66%) penalised; strong liquidity",
           "score": 31.13,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-07-09",
+          "reason": "score 31.13 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (66%) penalised; strong liquidity",
+          "score": 31.13,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -642,6 +648,12 @@
           "date": "2026-07-09",
           "reason": "score 42.11 above hold floor 6.00; below 20MA; below 50MA; lagging market; strong liquidity",
           "score": 42.11,
+          "status": "HOLD"
+        },
+        {
+          "date": "2026-07-09",
+          "reason": "score 52.74 above hold floor 6.00; above 20MA; below 50MA; lagging market; strong liquidity",
+          "score": 52.74,
           "status": "HOLD"
         },
         {
@@ -758,6 +770,12 @@
           "reason": "score 54.67 above hold floor 6.00; above 20MA; below 50MA; lagging market; strong liquidity",
           "score": 54.67,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-07-09",
+          "reason": "score 54.67 above hold floor 6.00; above 20MA; below 50MA; lagging market; strong liquidity",
+          "score": 54.67,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -841,6 +859,12 @@
         {
           "date": "2026-07-08",
           "reason": "score 30.00 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (223%) penalised; strong liquidity",
+          "score": 30.0,
+          "status": "HOLD"
+        },
+        {
+          "date": "2026-07-09",
+          "reason": "score 30.00 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (225%) penalised; strong liquidity",
           "score": 30.0,
           "status": "HOLD"
         },
@@ -964,6 +988,12 @@
           "reason": "score 73.12 above hold floor 6.00; above 20MA; above 50MA; low vol (17%); strong liquidity",
           "score": 73.12,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-07-09",
+          "reason": "score 73.12 above hold floor 6.00; above 20MA; above 50MA; low vol (17%); strong liquidity",
+          "score": 73.12,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -1054,6 +1084,12 @@
           "date": "2026-07-09",
           "reason": "score 35.31 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (90%) penalised; strong liquidity",
           "score": 35.31,
+          "status": "HOLD"
+        },
+        {
+          "date": "2026-07-09",
+          "reason": "score 49.98 above hold floor 6.00; below 20MA; above 50MA; high vol (91%) penalised; strong liquidity",
+          "score": 49.98,
           "status": "HOLD"
         },
         {
@@ -1170,6 +1206,12 @@
           "reason": "score 59.25 above hold floor 6.00; below 20MA; above 50MA; lagging market; low vol (20%); strong liquidity",
           "score": 59.25,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-07-09",
+          "reason": "score 59.25 above hold floor 6.00; below 20MA; above 50MA; lagging market; low vol (20%); strong liquidity",
+          "score": 59.25,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -1252,6 +1294,12 @@
         },
         {
           "date": "2026-07-08",
+          "reason": "score 42.25 above hold floor 6.00; above 20MA; below 50MA; lagging market; low vol (23%)",
+          "score": 42.25,
+          "status": "HOLD"
+        },
+        {
+          "date": "2026-07-09",
           "reason": "score 42.25 above hold floor 6.00; above 20MA; below 50MA; lagging market; low vol (23%)",
           "score": 42.25,
           "status": "HOLD"
