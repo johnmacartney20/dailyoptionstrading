@@ -347,7 +347,7 @@
       "ticker": "VFV"
     }
   ],
-  "generated_at": "2026-07-09T14:26:21Z",
+  "generated_at": "2026-07-09T23:12:59Z",
   "positions": [
     {
       "account_type": "FHSA",
@@ -363,10 +363,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 598.39,
+        "cash_amount": 570.4,
         "is_cash": true
       },
-      "quantity": 598,
+      "quantity": 570,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -374,9 +374,9 @@
     },
     {
       "account_type": "FHSA",
-      "entry_composite_score": 81.62,
+      "entry_composite_score": 81.08,
       "entry_date": "2026-07-09",
-      "entry_price": 549.65,
+      "entry_price": 546.72,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -394,9 +394,9 @@
     },
     {
       "account_type": "FHSA",
-      "entry_composite_score": 82.08,
+      "entry_composite_score": 81.45,
       "entry_date": "2026-07-09",
-      "entry_price": 249.99,
+      "entry_price": 250.61,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -414,9 +414,9 @@
     },
     {
       "account_type": "FHSA",
-      "entry_composite_score": 85.71,
+      "entry_composite_score": 82.88,
       "entry_date": "2026-07-09",
-      "entry_price": 106.85,
+      "entry_price": 106.41,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -426,7 +426,7 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 147,
+      "quantity": 148,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
@@ -446,10 +446,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 12390.35,
+        "cash_amount": 12264.39,
         "is_cash": true
       },
-      "quantity": 12390,
+      "quantity": 12264,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -466,8 +466,8 @@
         "table"
       ],
       "last_review_date": "2026-07-09",
-      "last_review_reason": "score 31.07 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (65%) penalised; strong liquidity",
-      "last_review_score": 31.07,
+      "last_review_reason": "score 31.13 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (66%) penalised; strong liquidity",
+      "last_review_score": 31.13,
       "metadata": {
         "asset_type": "equity",
         "cad_equiv": 498.11,
@@ -540,6 +540,12 @@
           "reason": "score 31.07 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (65%) penalised; strong liquidity",
           "score": 31.07,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-07-09",
+          "reason": "score 31.13 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (66%) penalised; strong liquidity",
+          "score": 31.13,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -557,8 +563,8 @@
         "table"
       ],
       "last_review_date": "2026-07-09",
-      "last_review_reason": "score 42.11 above hold floor 6.00; below 20MA; below 50MA; lagging market; strong liquidity",
-      "last_review_score": 42.11,
+      "last_review_reason": "score 52.74 above hold floor 6.00; above 20MA; below 50MA; lagging market; strong liquidity",
+      "last_review_score": 52.74,
       "metadata": {
         "asset_type": "equity",
         "cad_equiv": 1022.22,
@@ -631,6 +637,12 @@
           "reason": "score 42.11 above hold floor 6.00; below 20MA; below 50MA; lagging market; strong liquidity",
           "score": 42.11,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-07-09",
+          "reason": "score 52.74 above hold floor 6.00; above 20MA; below 50MA; lagging market; strong liquidity",
+          "score": 52.74,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -648,8 +660,8 @@
         "table"
       ],
       "last_review_date": "2026-07-09",
-      "last_review_reason": "score 42.32 above hold floor 6.00; below 20MA; below 50MA; lagging market; strong liquidity",
-      "last_review_score": 42.32,
+      "last_review_reason": "score 54.67 above hold floor 6.00; above 20MA; below 50MA; lagging market; strong liquidity",
+      "last_review_score": 54.67,
       "metadata": {
         "asset_type": "equity",
         "cad_equiv": 1091.85,
@@ -721,6 +733,12 @@
           "date": "2026-07-09",
           "reason": "score 42.32 above hold floor 6.00; below 20MA; below 50MA; lagging market; strong liquidity",
           "score": 42.32,
+          "status": "HOLD"
+        },
+        {
+          "date": "2026-07-09",
+          "reason": "score 54.67 above hold floor 6.00; above 20MA; below 50MA; lagging market; strong liquidity",
+          "score": 54.67,
           "status": "HOLD"
         }
       ],
@@ -813,6 +831,12 @@
           "reason": "score 30.00 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (225%) penalised; strong liquidity",
           "score": 30.0,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-07-09",
+          "reason": "score 30.00 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (225%) penalised; strong liquidity",
+          "score": 30.0,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -830,8 +854,8 @@
         "table"
       ],
       "last_review_date": "2026-07-09",
-      "last_review_reason": "score 62.68 above hold floor 6.00; below 20MA; above 50MA; low vol (17%); strong liquidity",
-      "last_review_score": 62.68,
+      "last_review_reason": "score 73.12 above hold floor 6.00; above 20MA; above 50MA; low vol (17%); strong liquidity",
+      "last_review_score": 73.12,
       "metadata": {
         "asset_type": "equity",
         "cad_equiv": 2569.8,
@@ -904,6 +928,12 @@
           "reason": "score 62.68 above hold floor 6.00; below 20MA; above 50MA; low vol (17%); strong liquidity",
           "score": 62.68,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-07-09",
+          "reason": "score 73.12 above hold floor 6.00; above 20MA; above 50MA; low vol (17%); strong liquidity",
+          "score": 73.12,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -921,8 +951,8 @@
         "table"
       ],
       "last_review_date": "2026-07-09",
-      "last_review_reason": "score 35.31 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (90%) penalised; strong liquidity",
-      "last_review_score": 35.31,
+      "last_review_reason": "score 49.98 above hold floor 6.00; below 20MA; above 50MA; high vol (91%) penalised; strong liquidity",
+      "last_review_score": 49.98,
       "metadata": {
         "asset_type": "equity",
         "cad_equiv": 195.1,
@@ -995,6 +1025,12 @@
           "reason": "score 35.31 above hold floor 6.00; below 20MA; below 50MA; lagging market; high vol (90%) penalised; strong liquidity",
           "score": 35.31,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-07-09",
+          "reason": "score 49.98 above hold floor 6.00; below 20MA; above 50MA; high vol (91%) penalised; strong liquidity",
+          "score": 49.98,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -1012,8 +1048,8 @@
         "table"
       ],
       "last_review_date": "2026-07-09",
-      "last_review_reason": "score 66.28 above hold floor 6.00; above 20MA; above 50MA; low vol (19%); strong liquidity",
-      "last_review_score": 66.28,
+      "last_review_reason": "score 59.25 above hold floor 6.00; below 20MA; above 50MA; lagging market; low vol (20%); strong liquidity",
+      "last_review_score": 59.25,
       "metadata": {
         "asset_type": "equity",
         "cad_equiv": 951.2,
@@ -1085,6 +1121,12 @@
           "date": "2026-07-09",
           "reason": "score 66.28 above hold floor 6.00; above 20MA; above 50MA; low vol (19%); strong liquidity",
           "score": 66.28,
+          "status": "HOLD"
+        },
+        {
+          "date": "2026-07-09",
+          "reason": "score 59.25 above hold floor 6.00; below 20MA; above 50MA; lagging market; low vol (20%); strong liquidity",
+          "score": 59.25,
           "status": "HOLD"
         }
       ],
@@ -1177,6 +1219,12 @@
           "reason": "score 42.25 above hold floor 6.00; above 20MA; below 50MA; lagging market; low vol (23%)",
           "score": 42.25,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-07-09",
+          "reason": "score 42.25 above hold floor 6.00; above 20MA; below 50MA; lagging market; low vol (23%)",
+          "score": 42.25,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -1185,9 +1233,9 @@
     },
     {
       "account_type": "OPTIONS",
-      "entry_composite_score": 87.96255497301502,
+      "entry_composite_score": 89.5782862192452,
       "entry_date": "2026-07-09",
-      "entry_price": 2.4,
+      "entry_price": 2.14,
       "entry_thesis_tags": [
         "risk-adjusted return",
         "otm quality",
@@ -1202,7 +1250,7 @@
         "option_type": "put",
         "strike": 175.0
       },
-      "quantity": 38,
+      "quantity": 34,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "put-spread",
@@ -1210,9 +1258,9 @@
     },
     {
       "account_type": "OPTIONS",
-      "entry_composite_score": 83.28416803233445,
+      "entry_composite_score": 82.39325987707569,
       "entry_date": "2026-07-09",
-      "entry_price": 3.6,
+      "entry_price": 4.0,
       "entry_thesis_tags": [
         "risk-adjusted return",
         "otm quality",
@@ -1227,7 +1275,7 @@
         "option_type": "put",
         "strike": 125.0
       },
-      "quantity": 71,
+      "quantity": 100,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "put-spread",
@@ -1247,10 +1295,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 196.69,
+        "cash_amount": 579.53,
         "is_cash": true
       },
-      "quantity": 197,
+      "quantity": 580,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -1258,9 +1306,9 @@
     },
     {
       "account_type": "RRSP",
-      "entry_composite_score": 80.48,
+      "entry_composite_score": 80.58,
       "entry_date": "2026-07-09",
-      "entry_price": 175.99,
+      "entry_price": 176.1,
       "entry_thesis_tags": [
         "above 50-day MA (strong trend)",
         "moderate volatility (20%)",
@@ -1270,7 +1318,7 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 44,
+      "quantity": 43,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "stability",
@@ -1278,9 +1326,9 @@
     },
     {
       "account_type": "RRSP",
-      "entry_composite_score": 92.12,
+      "entry_composite_score": 92.26,
       "entry_date": "2026-07-09",
-      "entry_price": 294.85,
+      "entry_price": 295.84,
       "entry_thesis_tags": [
         "above 50-day MA (strong trend)",
         "low volatility (13%)",
@@ -1290,7 +1338,7 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 30,
+      "quantity": 29,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "stability",
@@ -1298,9 +1346,9 @@
     },
     {
       "account_type": "RRSP",
-      "entry_composite_score": 86.81,
+      "entry_composite_score": 87.19,
       "entry_date": "2026-07-09",
-      "entry_price": 746.75,
+      "entry_price": 751.71,
       "entry_thesis_tags": [
         "above 50-day MA (strong trend)",
         "low volatility (16%)",
@@ -1330,10 +1378,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 240.23,
+        "cash_amount": 532.2,
         "is_cash": true
       },
-      "quantity": 240,
+      "quantity": 532,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -1341,9 +1389,9 @@
     },
     {
       "account_type": "TFSA",
-      "entry_composite_score": 81.62,
+      "entry_composite_score": 81.08,
       "entry_date": "2026-07-09",
-      "entry_price": 549.65,
+      "entry_price": 546.72,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1361,9 +1409,9 @@
     },
     {
       "account_type": "TFSA",
-      "entry_composite_score": 82.08,
+      "entry_composite_score": 81.45,
       "entry_date": "2026-07-09",
-      "entry_price": 249.99,
+      "entry_price": 250.61,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1373,7 +1421,7 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 83,
+      "quantity": 82,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
@@ -1381,9 +1429,9 @@
     },
     {
       "account_type": "TFSA",
-      "entry_composite_score": 85.71,
+      "entry_composite_score": 82.88,
       "entry_date": "2026-07-09",
-      "entry_price": 106.85,
+      "entry_price": 106.41,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1393,7 +1441,7 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 273,
+      "quantity": 274,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
