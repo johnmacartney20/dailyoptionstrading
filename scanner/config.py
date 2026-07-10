@@ -145,8 +145,8 @@ PORTFOLIO_THRESHOLDS: Dict[str, float] = {
 ACCOUNT_CAPITALS: Dict[str, float] = {
     "NON_REGISTERED": 20_000.0,
     "TFSA": 65_000.0,
-    "RRSP": 25_000.0,
-    "FHSA": 35_000.0,
+    "RRSP": 24_000.0,
+    "FHSA": 36_000.0,
 }
 
 # ── Legacy seeded holdings lists (migration helper input) ─────────────────────

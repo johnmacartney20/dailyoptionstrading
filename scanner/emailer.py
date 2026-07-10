@@ -75,7 +75,7 @@ _HTML_HEAD = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h1>📈 Daily Options Suggestions — {date}</h1>
+<h1>📈 Daily Trade Suggestions — {date}</h1>
 <p class="meta">Exchange(s): <strong>{exchange}</strong> &nbsp;|&nbsp;
 Total qualifying opportunities: <strong>{total}</strong></p>
 """
@@ -256,6 +256,8 @@ def _collapsed_holdings_review_html(
         return "<p>No active holdings to review today.</p>"
 
     df = review_df.copy()
+    if "verdict_tag" in df.columns:
+        df["verdict"] = df["verdict_tag"].fillna(df.get("verdict", ""))
     if "score_delta" not in df.columns:
         df["score_delta"] = 0.0
     if "verdict" not in df.columns:
@@ -268,8 +270,8 @@ def _collapsed_holdings_review_html(
     total = len(df)
     noteworthy_count = len(noteworthy)
     holds = int((verdicts == "HOLD").sum())
-    exit_count = int((verdicts == "EXIT").sum())
-    flag_count = int((verdicts == "FLAG").sum())
+    exit_count = int(verdicts.str.startswith("EXIT").sum())
+    flag_count = int(verdicts.str.startswith("FLAG").sum())
     large_delta_count = max(noteworthy_count - exit_count - flag_count, 0)
 
     body = (
@@ -397,6 +399,39 @@ def _holdings_review_to_html(review_df: pd.DataFrame) -> str:
     if review_df is None or review_df.empty:
         html += "<p>No active holdings to review today.</p></div>"
         return html
+
+    if "verdict_tag" in review_df.columns:
+        review_df = review_df.copy()
+        review_df["verdict"] = review_df["verdict_tag"].fillna(review_df.get("verdict", ""))
+
+    if {"account", "account_capital", "pct_of_account", "verdict"}.issubset(set(review_df.columns)):
+        live = review_df[~review_df["verdict"].astype(str).str.upper().str.startswith("EXIT")].copy()
+        lines: List[str] = []
+        caps = {"TFSA": 8, "FHSA": 7, "RRSP": 5}
+        for account in ["TFSA", "FHSA", "RRSP"]:
+            sub = live[live["account"].astype(str).str.upper() == account]
+            cap = float(pd.to_numeric(sub.get("account_capital"), errors="coerce").fillna(0.0).max()) if not sub.empty else 0.0
+            avg_pct = float(pd.to_numeric(sub.get("pct_of_account"), errors="coerce").fillna(0.0).mean()) if not sub.empty else 0.0
+            lines.append(f"{account}: ${cap:,.0f} | {len(sub)}/{caps[account]} cap used | avg position {avg_pct:.0f}%")
+
+        options_live = live[live["account"].astype(str).str.upper() == "OPTIONS"]
+        options_cap = float(pd.to_numeric(options_live.get("account_capital"), errors="coerce").fillna(0.0).max()) if not options_live.empty else 20_000.0
+        spreads = options_live[options_live["sub_portfolio"].astype(str).str.lower() == "put-spread"]
+        stock = options_live[options_live["sub_portfolio"].astype(str).str.lower() != "put-spread"]
+        over = max(len(stock) - 3, 0)
+        opt_line = (
+            f"OPTIONS: ${options_cap:,.0f} | Spreads ${options_cap * 0.50:,.0f} ({len(spreads)} open) | "
+            f"Stock ${options_cap * 0.50:,.0f} ({len(stock)} positions"
+        )
+        if over > 0:
+            opt_line += ", over 3-name cap - trimming today"
+        opt_line += ")"
+        lines.append(opt_line)
+
+        html += "<ul class='action-list'>"
+        for line in lines:
+            html += f"<li>{line}</li>"
+        html += "</ul>"
 
     cols = [
         "ticker",
@@ -1456,7 +1491,7 @@ def send_email(
         SMTP password; falls back to ``SMTP_PASSWORD`` env var.
     subject:
         Optional custom email subject.  Defaults to
-        ``"Daily Options Suggestions — YYYY-MM-DD"``.
+        ``"Daily Trade Suggestions — YYYY-MM-DD"``.
 
     Raises
     ------
@@ -1476,7 +1511,7 @@ def send_email(
         )
 
     today = date.today().strftime("%Y-%m-%d")
-    email_subject = subject if subject is not None else f"Daily Options Suggestions — {today}"
+    email_subject = subject if subject is not None else f"Daily Trade Suggestions — {today}"
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = email_subject
