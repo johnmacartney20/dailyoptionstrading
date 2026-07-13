@@ -932,12 +932,12 @@
       "ticker": "VFV"
     }
   ],
-  "generated_at": "2026-07-10T14:24:09Z",
+  "generated_at": "2026-07-13T14:25:03Z",
   "positions": [
     {
       "account_type": "FHSA",
       "entry_composite_score": 100.0,
-      "entry_date": "2026-07-10",
+      "entry_date": "2026-07-13",
       "entry_price": 1.0,
       "entry_thesis_tags": [
         "cash",
@@ -948,10 +948,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 398.95,
+        "cash_amount": 190.04,
         "is_cash": true
       },
-      "quantity": 399,
+      "quantity": 190,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -959,9 +959,9 @@
     },
     {
       "account_type": "FHSA",
-      "entry_composite_score": 85.0,
-      "entry_date": "2026-07-10",
-      "entry_price": 548.54,
+      "entry_composite_score": 78.09,
+      "entry_date": "2026-07-13",
+      "entry_price": 253.7,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -971,17 +971,17 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 29,
+      "quantity": 32,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
-      "ticker": "AMD"
+      "ticker": "BMO.TO"
     },
     {
       "account_type": "FHSA",
-      "entry_composite_score": 79.02,
-      "entry_date": "2026-07-10",
-      "entry_price": 132.05,
+      "entry_composite_score": 80.0,
+      "entry_date": "2026-07-13",
+      "entry_price": 68.53,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -991,17 +991,17 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 62,
+      "quantity": 168,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
-      "ticker": "GILD"
+      "ticker": "MRNA"
     },
     {
       "account_type": "FHSA",
-      "entry_composite_score": 80.95,
-      "entry_date": "2026-07-10",
-      "entry_price": 46.21,
+      "entry_composite_score": 83.42,
+      "entry_date": "2026-07-13",
+      "entry_price": 46.49,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1011,7 +1011,7 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 249,
+      "quantity": 348,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
@@ -1020,7 +1020,7 @@
     {
       "account_type": "OPTIONS",
       "entry_composite_score": 100.0,
-      "entry_date": "2026-07-10",
+      "entry_date": "2026-07-13",
       "entry_price": 1.0,
       "entry_thesis_tags": [
         "cash",
@@ -1031,10 +1031,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 10057.1,
+        "cash_amount": 9998.16,
         "is_cash": true
       },
-      "quantity": 10057,
+      "quantity": 9998,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -1042,32 +1042,9 @@
     },
     {
       "account_type": "OPTIONS",
-      "entry_composite_score": 85.0,
-      "entry_date": "2026-07-10",
-      "entry_price": 548.54,
-      "entry_thesis_tags": [
-        "above 20MA",
-        "above 50MA",
-        "outperforming market"
-      ],
-      "last_review_date": null,
-      "last_review_reason": "",
-      "last_review_score": null,
-      "metadata": {
-        "asset_type": "equity",
-        "cad_equiv": 4500.0
-      },
-      "quantity": 8,
-      "review_history": [],
-      "status": "HOLD",
-      "sub_portfolio": "growth",
-      "ticker": "AMD"
-    },
-    {
-      "account_type": "OPTIONS",
-      "entry_composite_score": 79.02,
-      "entry_date": "2026-07-10",
-      "entry_price": 132.05,
+      "entry_composite_score": 78.09,
+      "entry_date": "2026-07-13",
+      "entry_price": 253.7,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1080,17 +1057,17 @@
         "asset_type": "equity",
         "cad_equiv": 2300.0
       },
-      "quantity": 17,
+      "quantity": 9,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
-      "ticker": "GILD"
+      "ticker": "BMO.TO"
     },
     {
       "account_type": "OPTIONS",
-      "entry_composite_score": 80.95,
-      "entry_date": "2026-07-10",
-      "entry_price": 46.21,
+      "entry_composite_score": 80.0,
+      "entry_date": "2026-07-13",
+      "entry_price": 68.53,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1103,7 +1080,30 @@
         "asset_type": "equity",
         "cad_equiv": 3200.0
       },
-      "quantity": 69,
+      "quantity": 46,
+      "review_history": [],
+      "status": "HOLD",
+      "sub_portfolio": "growth",
+      "ticker": "MRNA"
+    },
+    {
+      "account_type": "OPTIONS",
+      "entry_composite_score": 83.42,
+      "entry_date": "2026-07-13",
+      "entry_price": 46.49,
+      "entry_thesis_tags": [
+        "above 20MA",
+        "above 50MA",
+        "outperforming market"
+      ],
+      "last_review_date": null,
+      "last_review_reason": "",
+      "last_review_score": null,
+      "metadata": {
+        "asset_type": "equity",
+        "cad_equiv": 4500.0
+      },
+      "quantity": 96,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
@@ -1111,9 +1111,9 @@
     },
     {
       "account_type": "OPTIONS",
-      "entry_composite_score": 88.44726005769711,
-      "entry_date": "2026-07-10",
-      "entry_price": 2.51,
+      "entry_composite_score": 81.7632209131524,
+      "entry_date": "2026-07-13",
+      "entry_price": 2.95,
       "entry_thesis_tags": [
         "risk-adjusted return",
         "otm quality",
@@ -1124,49 +1124,49 @@
       "last_review_score": null,
       "metadata": {
         "cad_equiv": 5000.0,
-        "capital_at_risk": 4980.0,
+        "capital_at_risk": 4920.0,
+        "expiry": "2026-08-21",
+        "long_strike": 145.0,
+        "option_type": "put",
+        "strike": 150.0
+      },
+      "quantity": 24,
+      "review_history": [],
+      "status": "HOLD",
+      "sub_portfolio": "put-spread",
+      "ticker": "CRM"
+    },
+    {
+      "account_type": "OPTIONS",
+      "entry_composite_score": 89.87264489028607,
+      "entry_date": "2026-07-13",
+      "entry_price": 2.02,
+      "entry_thesis_tags": [
+        "risk-adjusted return",
+        "otm quality",
+        "liquidity"
+      ],
+      "last_review_date": null,
+      "last_review_reason": "",
+      "last_review_score": null,
+      "metadata": {
+        "cad_equiv": 5000.0,
+        "capital_at_risk": 4768.0,
         "expiry": "2026-08-21",
         "long_strike": 175.0,
         "option_type": "put",
         "strike": 180.0
       },
-      "quantity": 20,
+      "quantity": 16,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "put-spread",
       "ticker": "NVDA"
     },
     {
-      "account_type": "OPTIONS",
-      "entry_composite_score": 87.63246299200534,
-      "entry_date": "2026-07-10",
-      "entry_price": 2.96,
-      "entry_thesis_tags": [
-        "risk-adjusted return",
-        "otm quality",
-        "liquidity"
-      ],
-      "last_review_date": null,
-      "last_review_reason": "",
-      "last_review_score": null,
-      "metadata": {
-        "cad_equiv": 5000.0,
-        "capital_at_risk": 4896.0,
-        "expiry": "2026-08-21",
-        "long_strike": 115.0,
-        "option_type": "put",
-        "strike": 120.0
-      },
-      "quantity": 24,
-      "review_history": [],
-      "status": "HOLD",
-      "sub_portfolio": "put-spread",
-      "ticker": "ORCL"
-    },
-    {
       "account_type": "RRSP",
       "entry_composite_score": 100.0,
-      "entry_date": "2026-07-10",
+      "entry_date": "2026-07-13",
       "entry_price": 1.0,
       "entry_thesis_tags": [
         "cash",
@@ -1177,10 +1177,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 743.36,
+        "cash_amount": 1112.89,
         "is_cash": true
       },
-      "quantity": 743,
+      "quantity": 1113,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -1188,9 +1188,9 @@
     },
     {
       "account_type": "RRSP",
-      "entry_composite_score": 82.24,
-      "entry_date": "2026-07-10",
-      "entry_price": 176.81,
+      "entry_composite_score": 81.62,
+      "entry_date": "2026-07-13",
+      "entry_price": 177.63,
       "entry_thesis_tags": [
         "above 50-day MA (strong trend)",
         "low volatility (20%)",
@@ -1200,7 +1200,7 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 42,
+      "quantity": 41,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "stability",
@@ -1208,19 +1208,19 @@
     },
     {
       "account_type": "RRSP",
-      "entry_composite_score": 91.69,
-      "entry_date": "2026-07-10",
-      "entry_price": 296.54,
+      "entry_composite_score": 91.94,
+      "entry_date": "2026-07-13",
+      "entry_price": 299.14,
       "entry_thesis_tags": [
         "above 50-day MA (strong trend)",
-        "low volatility (13%)",
+        "low volatility (14%)",
         "highly liquid large-cap"
       ],
       "last_review_date": null,
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 28,
+      "quantity": 27,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "stability",
@@ -1228,12 +1228,12 @@
     },
     {
       "account_type": "RRSP",
-      "entry_composite_score": 90.6,
-      "entry_date": "2026-07-10",
+      "entry_composite_score": 90.08,
+      "entry_date": "2026-07-13",
       "entry_price": 752.75,
       "entry_thesis_tags": [
         "above 50-day MA (strong trend)",
-        "low volatility (15%)",
+        "low volatility (14%)",
         "highly liquid large-cap"
       ],
       "last_review_date": null,
@@ -1249,7 +1249,7 @@
     {
       "account_type": "TFSA",
       "entry_composite_score": 100.0,
-      "entry_date": "2026-07-10",
+      "entry_date": "2026-07-13",
       "entry_price": 1.0,
       "entry_thesis_tags": [
         "cash",
@@ -1260,10 +1260,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 211.23,
+        "cash_amount": 278.6,
         "is_cash": true
       },
-      "quantity": 211,
+      "quantity": 279,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -1271,9 +1271,9 @@
     },
     {
       "account_type": "TFSA",
-      "entry_composite_score": 85.0,
-      "entry_date": "2026-07-10",
-      "entry_price": 548.54,
+      "entry_composite_score": 78.09,
+      "entry_date": "2026-07-13",
+      "entry_price": 253.7,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1283,17 +1283,17 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 53,
+      "quantity": 58,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
-      "ticker": "AMD"
+      "ticker": "BMO.TO"
     },
     {
       "account_type": "TFSA",
-      "entry_composite_score": 79.02,
-      "entry_date": "2026-07-10",
-      "entry_price": 132.05,
+      "entry_composite_score": 80.0,
+      "entry_date": "2026-07-13",
+      "entry_price": 68.53,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1303,17 +1303,17 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 113,
+      "quantity": 303,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
-      "ticker": "GILD"
+      "ticker": "MRNA"
     },
     {
       "account_type": "TFSA",
-      "entry_composite_score": 80.95,
-      "entry_date": "2026-07-10",
-      "entry_price": 46.21,
+      "entry_composite_score": 83.42,
+      "entry_date": "2026-07-13",
+      "entry_price": 46.49,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1323,7 +1323,7 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 450,
+      "quantity": 629,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
