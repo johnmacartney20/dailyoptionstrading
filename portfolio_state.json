@@ -932,12 +932,12 @@
       "ticker": "VFV"
     }
   ],
-  "generated_at": "2026-07-20T14:23:50Z",
+  "generated_at": "2026-07-21T14:20:23Z",
   "positions": [
     {
       "account_type": "FHSA",
       "entry_composite_score": 100.0,
-      "entry_date": "2026-07-20",
+      "entry_date": "2026-07-21",
       "entry_price": 1.0,
       "entry_thesis_tags": [
         "cash",
@@ -948,10 +948,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 303.62,
+        "cash_amount": 425.23,
         "is_cash": true
       },
-      "quantity": 304,
+      "quantity": 425,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -959,9 +959,9 @@
     },
     {
       "account_type": "FHSA",
-      "entry_composite_score": 87.01,
-      "entry_date": "2026-07-20",
-      "entry_price": 366.28,
+      "entry_composite_score": 86.02,
+      "entry_date": "2026-07-21",
+      "entry_price": 326.01,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -971,17 +971,17 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 44,
+      "quantity": 49,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
-      "ticker": "AMGN"
+      "ticker": "AAPL"
     },
     {
       "account_type": "FHSA",
-      "entry_composite_score": 85.4,
-      "entry_date": "2026-07-20",
-      "entry_price": 180.06,
+      "entry_composite_score": 84.92,
+      "entry_date": "2026-07-21",
+      "entry_price": 178.13,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -991,7 +991,7 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 63,
+      "quantity": 64,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
@@ -999,9 +999,9 @@
     },
     {
       "account_type": "FHSA",
-      "entry_composite_score": 81.68,
-      "entry_date": "2026-07-20",
-      "entry_price": 87.62,
+      "entry_composite_score": 84.26,
+      "entry_date": "2026-07-21",
+      "entry_price": 89.13,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1011,7 +1011,7 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 94,
+      "quantity": 92,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
@@ -1020,7 +1020,7 @@
     {
       "account_type": "OPTIONS",
       "entry_composite_score": 100.0,
-      "entry_date": "2026-07-20",
+      "entry_date": "2026-07-21",
       "entry_price": 1.0,
       "entry_thesis_tags": [
         "cash",
@@ -1031,10 +1031,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 10172.22,
+        "cash_amount": 10386.66,
         "is_cash": true
       },
-      "quantity": 10172,
+      "quantity": 10387,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -1042,9 +1042,9 @@
     },
     {
       "account_type": "OPTIONS",
-      "entry_composite_score": 87.01,
-      "entry_date": "2026-07-20",
-      "entry_price": 366.28,
+      "entry_composite_score": 86.02,
+      "entry_date": "2026-07-21",
+      "entry_price": 326.01,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1057,17 +1057,17 @@
         "asset_type": "equity",
         "cad_equiv": 4500.0
       },
-      "quantity": 12,
+      "quantity": 13,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
-      "ticker": "AMGN"
+      "ticker": "AAPL"
     },
     {
       "account_type": "OPTIONS",
-      "entry_composite_score": 85.4,
-      "entry_date": "2026-07-20",
-      "entry_price": 180.06,
+      "entry_composite_score": 84.92,
+      "entry_date": "2026-07-21",
+      "entry_price": 178.13,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1088,9 +1088,9 @@
     },
     {
       "account_type": "OPTIONS",
-      "entry_composite_score": 81.68,
-      "entry_date": "2026-07-20",
-      "entry_price": 87.62,
+      "entry_composite_score": 84.26,
+      "entry_date": "2026-07-21",
+      "entry_price": 89.13,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1103,7 +1103,7 @@
         "asset_type": "equity",
         "cad_equiv": 2300.0
       },
-      "quantity": 26,
+      "quantity": 25,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
@@ -1111,9 +1111,9 @@
     },
     {
       "account_type": "OPTIONS",
-      "entry_composite_score": 88.81596239597125,
-      "entry_date": "2026-07-20",
-      "entry_price": 1.98,
+      "entry_composite_score": 88.67656483926294,
+      "entry_date": "2026-07-21",
+      "entry_price": 1.85,
       "entry_thesis_tags": [
         "risk-adjusted return",
         "otm quality",
@@ -1124,13 +1124,13 @@
       "last_review_score": null,
       "metadata": {
         "cad_equiv": 5000.0,
-        "capital_at_risk": 4832.0,
+        "capital_at_risk": 4725.0,
         "expiry": "2026-08-21",
         "long_strike": 175.0,
         "option_type": "put",
         "strike": 180.0
       },
-      "quantity": 16,
+      "quantity": 15,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "put-spread",
@@ -1138,9 +1138,9 @@
     },
     {
       "account_type": "OPTIONS",
-      "entry_composite_score": 84.93343002333576,
-      "entry_date": "2026-07-20",
-      "entry_price": 2.8,
+      "entry_composite_score": 81.80750456510046,
+      "entry_date": "2026-07-21",
+      "entry_price": 3.25,
       "entry_thesis_tags": [
         "risk-adjusted return",
         "otm quality",
@@ -1151,13 +1151,13 @@
       "last_review_score": null,
       "metadata": {
         "cad_equiv": 5000.0,
-        "capital_at_risk": 4840.0,
+        "capital_at_risk": 4900.0,
         "expiry": "2026-08-21",
-        "long_strike": 100.0,
+        "long_strike": 105.0,
         "option_type": "put",
-        "strike": 105.0
+        "strike": 110.0
       },
-      "quantity": 22,
+      "quantity": 28,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "put-spread",
@@ -1166,7 +1166,7 @@
     {
       "account_type": "RRSP",
       "entry_composite_score": 100.0,
-      "entry_date": "2026-07-20",
+      "entry_date": "2026-07-21",
       "entry_price": 1.0,
       "entry_thesis_tags": [
         "cash",
@@ -1177,10 +1177,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 316.66,
+        "cash_amount": 414.98,
         "is_cash": true
       },
-      "quantity": 317,
+      "quantity": 415,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -1188,12 +1188,12 @@
     },
     {
       "account_type": "RRSP",
-      "entry_composite_score": 84.39,
-      "entry_date": "2026-07-20",
-      "entry_price": 180.06,
+      "entry_composite_score": 83.05,
+      "entry_date": "2026-07-21",
+      "entry_price": 178.13,
       "entry_thesis_tags": [
         "above 50-day MA (strong trend)",
-        "low volatility (20%)",
+        "moderate volatility (21%)",
         "highly liquid large-cap"
       ],
       "last_review_date": null,
@@ -1208,12 +1208,12 @@
     },
     {
       "account_type": "RRSP",
-      "entry_composite_score": 86.46,
-      "entry_date": "2026-07-20",
-      "entry_price": 297.88,
+      "entry_composite_score": 84.15,
+      "entry_date": "2026-07-21",
+      "entry_price": 296.88,
       "entry_thesis_tags": [
         "above 50-day MA (strong trend)",
-        "low volatility (16%)",
+        "low volatility (17%)",
         "highly liquid large-cap"
       ],
       "last_review_date": null,
@@ -1228,9 +1228,9 @@
     },
     {
       "account_type": "RRSP",
-      "entry_composite_score": 90.0,
-      "entry_date": "2026-07-20",
-      "entry_price": 745.08,
+      "entry_composite_score": 90.22,
+      "entry_date": "2026-07-21",
+      "entry_price": 746.05,
       "entry_thesis_tags": [
         "above 50-day MA (strong trend)",
         "low volatility (12%)",
@@ -1249,7 +1249,7 @@
     {
       "account_type": "TFSA",
       "entry_composite_score": 100.0,
-      "entry_date": "2026-07-20",
+      "entry_date": "2026-07-21",
       "entry_price": 1.0,
       "entry_thesis_tags": [
         "cash",
@@ -1260,10 +1260,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 461.58,
+        "cash_amount": 437.32,
         "is_cash": true
       },
-      "quantity": 462,
+      "quantity": 437,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -1271,9 +1271,9 @@
     },
     {
       "account_type": "TFSA",
-      "entry_composite_score": 87.01,
-      "entry_date": "2026-07-20",
-      "entry_price": 366.28,
+      "entry_composite_score": 86.02,
+      "entry_date": "2026-07-21",
+      "entry_price": 326.01,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1283,17 +1283,17 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 79,
+      "quantity": 89,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
-      "ticker": "AMGN"
+      "ticker": "AAPL"
     },
     {
       "account_type": "TFSA",
-      "entry_composite_score": 85.4,
-      "entry_date": "2026-07-20",
-      "entry_price": 180.06,
+      "entry_composite_score": 84.92,
+      "entry_date": "2026-07-21",
+      "entry_price": 178.13,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1303,7 +1303,7 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 115,
+      "quantity": 116,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
@@ -1311,9 +1311,9 @@
     },
     {
       "account_type": "TFSA",
-      "entry_composite_score": 81.68,
-      "entry_date": "2026-07-20",
-      "entry_price": 87.62,
+      "entry_composite_score": 84.26,
+      "entry_date": "2026-07-21",
+      "entry_price": 89.13,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1323,7 +1323,7 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 170,
+      "quantity": 167,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
