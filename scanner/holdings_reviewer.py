@@ -279,6 +279,8 @@ def _tier1_verdict(current_score: float, prior_flag_days: int) -> Tuple[str, str
 
     if current_score < 60.0:
         new_count = prior_flag_days + 1
+        # Lower half of the FLAG band is treated as high urgency to reduce
+        # portfolio dilution from weak, small positions.
         if current_score < 52.0:
             return STATUS_EXIT, "EXIT (score)", f"score {current_score:.2f} in severe FLAG band 45-52"
         if new_count >= 2:

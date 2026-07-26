@@ -1640,6 +1640,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     raw_suggestions = suggestions.copy()
 
+    # FHSA uses blended lockout timing between TFSA (longer, growth-oriented)
+    # and RRSP (shorter, stability-oriented).
     lockout_days = {"OPTIONS": 10, "TFSA": 10, "FHSA": 8, "RRSP": 6}
     options_lockout_families = _recent_exit_lockout_families(
         state,
