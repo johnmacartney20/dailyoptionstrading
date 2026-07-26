@@ -5,7 +5,7 @@ from scanner.holdings_reviewer import account_health_summary_lines, exited_capit
 
 def test_review_holdings_tier1_two_day_flag_and_immediate_exit(monkeypatch):
     # Scores map to tightened policy bands:
-    # >=70 core HOLD, 60-70 trim-watch HOLD, 52-60 FLAG (then persistence exit),
+    # >=70 core HOLD, 60-70 trim-watch HOLD, 52-60 FLAG (exit on 2nd consecutive FLAG day),
     # 45-52 severe FLAG auto-exit, <45 immediate EXIT.
     score_map = {
         "CORE": 70.0,
