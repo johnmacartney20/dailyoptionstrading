@@ -26,6 +26,7 @@ from scanner.portfolio_allocator import (
     RrspStockAllocation,
     StockAllocation,
     TfsaStockPortfolio,
+    allocate_fhsa_stock_portfolio,
     _tfsa_concentrated_allocation,
     allocate_rrsp_portfolio,
     allocate_tfsa_stock_portfolio,
@@ -320,6 +321,17 @@ def test_rrsp_zero_capital_returns_no_positions():
     result = allocate_rrsp_portfolio({"RY.TO": hist}, total_capital=0.0)
     assert result.num_positions == 0
     assert result.total_deployed == 0.0
+
+
+def test_fhsa_blended_allocation_returns_positions():
+    hists = {
+        "AAPL": _make_history(60, drift=0.006, vol=0.005, seed=1),
+        "AMGN": _make_history(60, drift=0.004, vol=0.006, seed=2),
+        "COST": _make_history(60, drift=0.003, vol=0.007, seed=3),
+    }
+    result = allocate_fhsa_stock_portfolio(hists, total_capital=1000.0, max_positions=3)
+    assert result.num_positions >= 1
+    assert result.total_deployed == pytest.approx(1000.0, abs=0.5)
 
 
 def test_rrsp_respects_sector_cap():

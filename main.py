@@ -80,6 +80,7 @@ from scanner.portfolio_allocator import (
     RrspPortfolio,
     TfsaAllocation,
     TfsaStockPortfolio,
+    allocate_fhsa_stock_portfolio,
     allocate_portfolio,
     allocate_rrsp_portfolio,
     allocate_tfsa_portfolio,
@@ -1459,6 +1460,7 @@ def _active_noncash_position_keys(state: dict) -> set[tuple[str, str, str]]:
 def _recent_exit_lockout_families(
     state: dict,
     lockout_days: int = 10,
+    account_type: Optional[str] = None,
     as_of: Optional[date] = None,
 ) -> set[str]:
     """Return normalized ticker families still inside the re-entry lockout window."""
@@ -1466,6 +1468,8 @@ def _recent_exit_lockout_families(
     families: set[str] = set()
 
     for pos in state.get("closed_positions", []):
+        if account_type and str(pos.get("account_type", "")).upper() != account_type.upper():
+            continue
         exit_date_raw = str(pos.get("exit_date", "")).strip()
         if not exit_date_raw:
             continue
@@ -1476,6 +1480,16 @@ def _recent_exit_lockout_families(
         if (today - exit_dt).days < int(lockout_days):
             families.add(_ticker_family_key(str(pos.get("ticker", ""))))
     return families
+
+
+def _apply_lockout_to_suggestions(
+    suggestions: pd.DataFrame,
+    lockout_families: set[str],
+) -> pd.DataFrame:
+    if suggestions.empty or not lockout_families or "ticker" not in suggestions.columns:
+        return suggestions
+    families = suggestions["ticker"].map(_ticker_family_key)
+    return suggestions[~families.isin(lockout_families)].copy()
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -1738,19 +1752,27 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     raw_suggestions = suggestions.copy()
 
-    # Tier 4: 10-day lockout after EXIT before ticker can re-enter as a new candidate.
-    lockout_families = _recent_exit_lockout_families(state, lockout_days=10)
-    if not suggestions.empty and lockout_families and "ticker" in suggestions.columns:
-        family_keys = suggestions["ticker"].map(_ticker_family_key)
-        before = len(suggestions)
-        suggestions = suggestions[~family_keys.isin(lockout_families)].copy()
-        filtered = before - len(suggestions)
-        if filtered > 0:
-            logger.info(
-                "Tier 4 re-entry lockout removed %d candidate(s) across %d locked ticker families.",
-                filtered,
-                len(lockout_families),
-            )
+    lockout_days = {"OPTIONS": 10, "TFSA": 10, "FHSA": 8, "RRSP": 6}
+    options_lockout_families = _recent_exit_lockout_families(
+        state,
+        lockout_days=lockout_days["OPTIONS"],
+        account_type="OPTIONS",
+    )
+    tfsa_lockout_families = _recent_exit_lockout_families(
+        state,
+        lockout_days=lockout_days["TFSA"],
+        account_type="TFSA",
+    )
+    fhsa_lockout_families = _recent_exit_lockout_families(
+        state,
+        lockout_days=lockout_days["FHSA"],
+        account_type="FHSA",
+    )
+    rrsp_lockout_families = _recent_exit_lockout_families(
+        state,
+        lockout_days=lockout_days["RRSP"],
+        account_type="RRSP",
+    )
 
     # ── Strategy filter ────────────────────────────────────────────────────────
     if args.strategy != "all":
@@ -1758,6 +1780,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             suggestions = suggestions[suggestions["option_type"] == args.strategy]
         else:
             suggestions = suggestions.iloc[0:0]
+
+    options_suggestions = _apply_lockout_to_suggestions(suggestions, options_lockout_families)
+    tfsa_option_suggestions = _apply_lockout_to_suggestions(suggestions, tfsa_lockout_families)
 
     # ── Optional risk controls / sizing ─────────────────────────────────────
     use_risk_controls = any(
@@ -1859,7 +1884,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     with ThreadPoolExecutor(max_workers=2) as executor:
         fut_portfolio = executor.submit(
             allocate_portfolio,
-            suggestions,
+            options_suggestions,
             total_capital=options_spreads_capital,
             max_trades=2,
             existing_holdings=options_existing,
@@ -1869,7 +1894,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         fut_tfsa_opts = executor.submit(
             allocate_tfsa_portfolio,
-            suggestions,
+            tfsa_option_suggestions,
             total_capital=tfsa_available_cash,
             max_trades=0,
             existing_holdings=tfsa_option_existing,
@@ -1887,8 +1912,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     # ── Stock-based TFSA (growth) & RRSP (stability) allocations ──────────────
     logger.info("Fetching price histories for TFSA/RRSP/FHSA stock scoring …")
     stock_universe = sorted(set(tickers) | set(tfsa_stock_existing) | set(rrsp_existing) | set(fhsa_existing))
-    tfsa_stock_histories = _fetch_price_histories(stock_universe)
-    rrsp_histories = _fetch_price_histories(RRSP_TICKERS)
+    tfsa_lockouts = set(tfsa_lockout_families)
+    fhsa_lockouts = set(fhsa_lockout_families)
+    rrsp_lockouts = set(rrsp_lockout_families)
+    tfsa_stock_universe = [t for t in stock_universe if _ticker_family_key(t) not in tfsa_lockouts]
+    fhsa_stock_universe = [t for t in stock_universe if _ticker_family_key(t) not in fhsa_lockouts]
+    rrsp_stock_universe = [t for t in RRSP_TICKERS if _ticker_family_key(t) not in rrsp_lockouts]
+    tfsa_stock_histories = _fetch_price_histories(tfsa_stock_universe)
+    fhsa_stock_histories = _fetch_price_histories(fhsa_stock_universe)
+    rrsp_histories = _fetch_price_histories(rrsp_stock_universe)
     logger.debug("SPY 20-day return used as market benchmark: %.2f%%", market_ret * 100)
 
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -1922,19 +1954,19 @@ def main(argv: Optional[List[str]] = None) -> int:
             allocate_rrsp_portfolio,
             rrsp_histories,
             rrsp_available_cash,
-            3,
-            0.50,
+            4,
+            0.45,
             rrsp_existing,
             rrsp_flagged,
             entry_bar,
             displacement_margin,
         )
         fut_fhsa_stock = executor.submit(
-            allocate_tfsa_stock_portfolio,
-            tfsa_stock_histories,
+            allocate_fhsa_stock_portfolio,
+            fhsa_stock_histories,
             fhsa_available_cash,
-            3,
-            0.50,
+            4,
+            0.475,
             0.50,
             market_ret,
             fhsa_existing,
