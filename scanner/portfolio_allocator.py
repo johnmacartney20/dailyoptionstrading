@@ -10,7 +10,7 @@ import math
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, SupportsFloat
 
 import pandas as pd
 
@@ -23,9 +23,9 @@ from .analyzer import (
 logger = logging.getLogger(__name__)
 
 
-def _is_positive_finite(value: float) -> bool:
-    value = float(value)
-    return math.isfinite(value) and value > 0
+def _is_positive_finite(value: SupportsFloat) -> bool:
+    numeric_value = float(value)
+    return math.isfinite(numeric_value) and numeric_value > 0
 
 # ── Sector mapping ─────────────────────────────────────────────────────────────
 TICKER_SECTORS: Dict[str, str] = {
@@ -852,8 +852,7 @@ def allocate_tfsa_stock_portfolio(
             logger.warning("Skipping %s for TFSA growth allocation due to invalid latest close: %r", ticker, price)
             continue
         score = score_stock_growth(hist, market_return_20d)
-        score_composite = float(score.composite)
-        if math.isfinite(score_composite) and score_composite > 0:
+        if math.isfinite(score.composite) and score.composite > 0:
             candidates.append((ticker, price, score))
 
     # Sort by composite score descending
@@ -1141,8 +1140,7 @@ def allocate_rrsp_portfolio(
             logger.warning("Skipping %s for RRSP stability allocation due to invalid latest close: %r", ticker, price)
             continue
         score = score_stock_stability(hist)
-        score_composite = float(score.composite)
-        if math.isfinite(score_composite) and score_composite > 0:
+        if math.isfinite(score.composite) and score.composite > 0:
             candidates.append((ticker, price, score))
 
     candidates.sort(key=lambda x: x[2].composite, reverse=True)
