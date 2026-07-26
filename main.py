@@ -73,13 +73,13 @@ from scanner.holdings_reviewer import (
     review_holdings,
     review_summary,
     reviews_to_frame,
-    track_options_performance,
 )
 from scanner.portfolio_allocator import (
     PortfolioAllocation,
     RrspPortfolio,
     TfsaAllocation,
     TfsaStockPortfolio,
+    allocate_fhsa_stock_portfolio,
     allocate_portfolio,
     allocate_rrsp_portfolio,
     allocate_tfsa_portfolio,
@@ -97,7 +97,6 @@ from scanner.portfolio_state import (
     move_exited_positions,
     portfolio_summary,
     save_portfolio_state,
-    weekly_options_performance_summary,
 )
 from scanner.risk import (
     add_position_sizing_columns,
@@ -996,59 +995,6 @@ def _print_model_holdings_snapshot(state: dict) -> None:
     print(f"{sep}\n")
 
 
-def _print_options_performance(options_perf: pd.DataFrame) -> None:
-    """Pretty-print daily options mark-to-market performance."""
-    sep = "=" * 110
-    dash = "-" * 110
-
-    print(f"\n{sep}")
-    print("  OPTIONS PERFORMANCE  —  Daily Mark-to-Market")
-    print(sep)
-
-    if options_perf is None or options_perf.empty:
-        print("  No active option positions to track.")
-        print(f"{sep}\n")
-        return
-
-    display = options_perf.copy()
-    headers = [
-        "Ticker", "Acct", "Type", "Expiry", "Qty", "Entry", "Mark", "Day Δ", "P&L $", "Ret %", "DTE", "Note",
-    ]
-    col_w = [8, 6, 6, 10, 4, 7, 7, 7, 9, 7, 4, 28]
-    header_row = "  " + "  ".join(h.ljust(col_w[i]) for i, h in enumerate(headers))
-    print(header_row)
-    print("  " + dash[:len(header_row) - 2])
-
-    for _, r in display.iterrows():
-        entry = "-" if pd.isna(r.get("entry")) else f"{float(r.get('entry')):.2f}"
-        mark = "-" if pd.isna(r.get("mark")) else f"{float(r.get('mark')):.2f}"
-        day_change = "-" if pd.isna(r.get("daily_change")) else f"{float(r.get('daily_change')):+.2f}"
-        pnl = "-" if pd.isna(r.get("unrealized_pnl")) else f"{float(r.get('unrealized_pnl')):+.2f}"
-        ret_pct = "-" if pd.isna(r.get("return_pct")) else f"{float(r.get('return_pct')):+.1f}%"
-        dte = "-" if pd.isna(r.get("dte")) else str(int(r.get("dte")))
-        note = str(r.get("note", ""))[:28]
-        row = [
-            str(r.get("ticker", ""))[:8],
-            str(r.get("account", ""))[:6],
-            str(r.get("option_type", "")).upper()[:6],
-            str(r.get("expiry", ""))[:10],
-            str(int(r.get("qty", 0))) if not pd.isna(r.get("qty")) else "-",
-            entry,
-            mark,
-            day_change,
-            pnl,
-            ret_pct,
-            dte,
-            note,
-        ]
-        print("  " + "  ".join(str(v).ljust(col_w[i]) for i, v in enumerate(row)))
-
-    tracked = display[display["unrealized_pnl"].notna()]
-    total_pnl = float(tracked["unrealized_pnl"].sum()) if not tracked.empty else 0.0
-    print(f"\n  Total tracked options unrealized P&L: ${total_pnl:+,.2f}")
-    print(f"{sep}\n")
-
-
 def _print_compact_summary(
     suggestions: pd.DataFrame,
     portfolio: PortfolioAllocation,
@@ -1113,6 +1059,21 @@ def _position_book_value(pos: dict) -> float:
         except (TypeError, ValueError):
             pass
     return float(pos.get("entry_price", 0.0) or 0.0) * float(pos.get("quantity", 0.0) or 0.0)
+
+
+def _available_account_cash(state: dict, account_type: str, account_capital: float) -> float:
+    """Return estimated deployable cash after non-cash HOLD/FLAG positions only."""
+    deployed = 0.0
+    for pos in state.get("positions", []):
+        if str(pos.get("account_type", "")).upper() != account_type.upper():
+            continue
+        if str(pos.get("status", "")).upper() not in {STATUS_HOLD, STATUS_FLAG}:
+            continue
+        metadata = pos.get("metadata", {}) or {}
+        if bool(metadata.get("is_cash", False)):
+            continue
+        deployed += max(_position_book_value(pos), 0.0)
+    return max(float(account_capital) - deployed, 0.0)
 
 
 def _ticker_family_key(ticker: str) -> str:
@@ -1367,60 +1328,6 @@ def _print_rebalance_plan(plan: list[dict]) -> None:
     print(f"{sep}\n")
 
 
-def _print_weekly_options_summary(summary: dict) -> None:
-    """Print weekly high-conviction options performance summary."""
-    sep = "=" * 110
-    dash = "-" * 110
-    rows = list(summary.get("rows", []))
-
-    print(f"\n{sep}")
-    print("  WEEKLY OPTIONS PERFORMANCE  —  High-Conviction Trades")
-    print(sep)
-    print(
-        "  "
-        f"Lookback: {summary.get('lookback_days', 7)} days | "
-        f"Entry score floor: {float(summary.get('min_entry_score', 0.0)):.1f} | "
-        f"Tracked option positions (not total holdings): {int(summary.get('tracked_positions', 0))}"
-    )
-
-    if not rows:
-        print("  No high-conviction options with performance history in the lookback window.")
-        print(f"{sep}\n")
-        return
-
-    headers = [
-        "Ticker", "Acct", "Type", "Expiry", "Qty", "EntryScr", "Start", "End", "Wk P&L", "Unrl P&L", "Wk Ret", "Days",
-    ]
-    col_w = [8, 6, 6, 10, 4, 8, 7, 7, 8, 10, 7, 4]
-    header_row = "  " + "  ".join(h.ljust(col_w[i]) for i, h in enumerate(headers))
-    print(header_row)
-    print("  " + dash[:len(header_row) - 2])
-
-    for r in rows:
-        row = [
-            str(r.get("ticker", ""))[:8],
-            str(r.get("account", ""))[:6],
-            str(r.get("option_type", "")).upper()[:6],
-            str(r.get("expiry", ""))[:10],
-            str(int(r.get("qty", 0))),
-            f"{float(r.get('entry_score', 0.0)):.1f}",
-            f"{float(r.get('start_mark', 0.0)):.2f}",
-            f"{float(r.get('end_mark', 0.0)):.2f}",
-            f"{float(r.get('weekly_pnl_change', 0.0)):+.0f}",
-            f"{float(r.get('unrealized_pnl', 0.0)):+.0f}",
-            f"{float(r.get('weekly_return_pct', 0.0)):+.1f}%",
-            str(int(r.get("days_captured", 0))),
-        ]
-        print("  " + "  ".join(str(v).ljust(col_w[i]) for i, v in enumerate(row)))
-
-    print(
-        "\n  "
-        f"Total weekly P&L change: ${float(summary.get('total_weekly_pnl_change', 0.0)):+,.2f} | "
-        f"Total unrealized P&L: ${float(summary.get('total_unrealized_pnl', 0.0)):+,.2f}"
-    )
-    print(f"{sep}\n")
-
-
 def _active_noncash_position_keys(state: dict) -> set[tuple[str, str, str]]:
     """Return natural keys for active, non-cash positions."""
     keys: set[tuple[str, str, str]] = set()
@@ -1444,6 +1351,7 @@ def _active_noncash_position_keys(state: dict) -> set[tuple[str, str, str]]:
 def _recent_exit_lockout_families(
     state: dict,
     lockout_days: int = 10,
+    account_type: Optional[str] = None,
     as_of: Optional[date] = None,
 ) -> set[str]:
     """Return normalized ticker families still inside the re-entry lockout window."""
@@ -1451,6 +1359,8 @@ def _recent_exit_lockout_families(
     families: set[str] = set()
 
     for pos in state.get("closed_positions", []):
+        if account_type and str(pos.get("account_type", "")).upper() != account_type.upper():
+            continue
         exit_date_raw = str(pos.get("exit_date", "")).strip()
         if not exit_date_raw:
             continue
@@ -1461,6 +1371,16 @@ def _recent_exit_lockout_families(
         if (today - exit_dt).days < int(lockout_days):
             families.add(_ticker_family_key(str(pos.get("ticker", ""))))
     return families
+
+
+def _apply_lockout_to_suggestions(
+    suggestions: pd.DataFrame,
+    lockout_families: set[str],
+) -> pd.DataFrame:
+    if suggestions.empty or not lockout_families or "ticker" not in suggestions.columns:
+        return suggestions
+    families = suggestions["ticker"].map(_ticker_family_key)
+    return suggestions[~families.isin(lockout_families)].copy()
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -1689,10 +1609,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         freed_capital.get("OPTIONS_stock", 0.0),
     )
     move_exited_positions(state)
-    open_positions = get_positions(state, statuses=[STATUS_HOLD, STATUS_FLAG])
-    options_perf_df = track_options_performance(open_positions)
     _print_model_holdings_snapshot(state)
-    _print_options_performance(options_perf_df)
 
     # ── Build ticker list ──────────────────────────────────────────────────────
     tickers: List[str] = []
@@ -1723,19 +1640,29 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     raw_suggestions = suggestions.copy()
 
-    # Tier 4: 10-day lockout after EXIT before ticker can re-enter as a new candidate.
-    lockout_families = _recent_exit_lockout_families(state, lockout_days=10)
-    if not suggestions.empty and lockout_families and "ticker" in suggestions.columns:
-        family_keys = suggestions["ticker"].map(_ticker_family_key)
-        before = len(suggestions)
-        suggestions = suggestions[~family_keys.isin(lockout_families)].copy()
-        filtered = before - len(suggestions)
-        if filtered > 0:
-            logger.info(
-                "Tier 4 re-entry lockout removed %d candidate(s) across %d locked ticker families.",
-                filtered,
-                len(lockout_families),
-            )
+    # OPTIONS and TFSA share the longest lockout; RRSP uses the shortest.
+    # FHSA sits between them as a blended account.
+    lockout_days = {"OPTIONS": 10, "TFSA": 10, "FHSA": 8, "RRSP": 6}
+    options_lockout_families = _recent_exit_lockout_families(
+        state,
+        lockout_days=lockout_days["OPTIONS"],
+        account_type="OPTIONS",
+    )
+    tfsa_lockout_families = _recent_exit_lockout_families(
+        state,
+        lockout_days=lockout_days["TFSA"],
+        account_type="TFSA",
+    )
+    fhsa_lockout_families = _recent_exit_lockout_families(
+        state,
+        lockout_days=lockout_days["FHSA"],
+        account_type="FHSA",
+    )
+    rrsp_lockout_families = _recent_exit_lockout_families(
+        state,
+        lockout_days=lockout_days["RRSP"],
+        account_type="RRSP",
+    )
 
     # ── Strategy filter ────────────────────────────────────────────────────────
     if args.strategy != "all":
@@ -1743,6 +1670,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             suggestions = suggestions[suggestions["option_type"] == args.strategy]
         else:
             suggestions = suggestions.iloc[0:0]
+
+    options_suggestions = _apply_lockout_to_suggestions(suggestions, options_lockout_families)
+    tfsa_option_suggestions = _apply_lockout_to_suggestions(suggestions, tfsa_lockout_families)
 
     # ── Optional risk controls / sizing ─────────────────────────────────────
     use_risk_controls = any(
@@ -1778,9 +1708,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         sub_portfolio="put-spread",
         statuses=[STATUS_HOLD, STATUS_FLAG],
     )
+    options_stock_existing = get_holding_tickers(
+        state,
+        account_type="OPTIONS",
+        sub_portfolio="growth",
+        statuses=[STATUS_HOLD, STATUS_FLAG],
+    )
     tfsa_option_existing = get_holding_tickers(
         state,
         account_type="TFSA",
+        sub_portfolio="long-call",
         statuses=[STATUS_HOLD, STATUS_FLAG],
     )
     tfsa_stock_existing = get_holding_tickers(
@@ -1801,32 +1738,57 @@ def main(argv: Optional[List[str]] = None) -> int:
         sub_portfolio="growth",
         statuses=[STATUS_HOLD, STATUS_FLAG],
     )
+    options_flagged = _flagged_score_map(state, "OPTIONS", "put-spread")
+    options_stock_flagged = _flagged_score_map(state, "OPTIONS", "growth")
+    tfsa_options_flagged = _flagged_score_map(state, "TFSA", "long-call")
+    tfsa_stock_flagged = _flagged_score_map(state, "TFSA", "growth")
+    rrsp_flagged = _flagged_score_map(state, "RRSP", "stability")
+    fhsa_flagged = _flagged_score_map(state, "FHSA", "growth")
 
     # ── Options portfolio allocation ───────────────────────────────────────────
     # OPTIONS account uses a strict 50/50 split between spreads and stock sleeves.
-    options_total_capital = float(ACCOUNT_CAPITALS.get("NON_REGISTERED", 20_000.0))
+    options_total_capital = _available_account_cash(
+        state,
+        "OPTIONS",
+        float(ACCOUNT_CAPITALS.get("NON_REGISTERED", 20_000.0)),
+    )
     options_spreads_capital = options_total_capital * 0.50
     options_stock_capital = options_total_capital * 0.50
+    tfsa_available_cash = _available_account_cash(
+        state,
+        "TFSA",
+        float(ACCOUNT_CAPITALS.get("TFSA", 65_000.0)),
+    )
+    rrsp_available_cash = _available_account_cash(
+        state,
+        "RRSP",
+        float(ACCOUNT_CAPITALS.get("RRSP", 24_000.0)),
+    )
+    fhsa_available_cash = _available_account_cash(
+        state,
+        "FHSA",
+        float(ACCOUNT_CAPITALS.get("FHSA", 36_000.0)),
+    )
 
     # Both options allocations are independent — run them in parallel.
     with ThreadPoolExecutor(max_workers=2) as executor:
         fut_portfolio = executor.submit(
             allocate_portfolio,
-            suggestions,
+            options_suggestions,
             total_capital=options_spreads_capital,
             max_trades=2,
-            existing_holdings=[],
-            flagged_holdings_scores={},
+            existing_holdings=options_existing,
+            flagged_holdings_scores=options_flagged,
             entry_score_min=entry_bar,
             displacement_margin=displacement_margin,
         )
         fut_tfsa_opts = executor.submit(
             allocate_tfsa_portfolio,
-            suggestions,
-            total_capital=float(ACCOUNT_CAPITALS.get("TFSA", 65_000.0)),
+            tfsa_option_suggestions,
+            total_capital=tfsa_available_cash,
             max_trades=0,
-            existing_holdings=[],
-            flagged_holdings_scores={},
+            existing_holdings=tfsa_option_existing,
+            flagged_holdings_scores=tfsa_options_flagged,
             entry_score_min=entry_bar,
             displacement_margin=displacement_margin,
         )
@@ -1840,8 +1802,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     # ── Stock-based TFSA (growth) & RRSP (stability) allocations ──────────────
     logger.info("Fetching price histories for TFSA/RRSP/FHSA stock scoring …")
     stock_universe = sorted(set(tickers) | set(tfsa_stock_existing) | set(rrsp_existing) | set(fhsa_existing))
-    tfsa_stock_histories = _fetch_price_histories(stock_universe)
-    rrsp_histories = _fetch_price_histories(RRSP_TICKERS)
+    tfsa_lockouts = set(tfsa_lockout_families)
+    fhsa_lockouts = set(fhsa_lockout_families)
+    rrsp_lockouts = set(rrsp_lockout_families)
+    tfsa_stock_universe = [t for t in stock_universe if _ticker_family_key(t) not in tfsa_lockouts]
+    fhsa_stock_universe = [t for t in stock_universe if _ticker_family_key(t) not in fhsa_lockouts]
+    rrsp_stock_universe = [t for t in RRSP_TICKERS if _ticker_family_key(t) not in rrsp_lockouts]
+    tfsa_stock_histories = _fetch_price_histories(tfsa_stock_universe)
+    fhsa_stock_histories = _fetch_price_histories(fhsa_stock_universe)
+    rrsp_histories = _fetch_price_histories(rrsp_stock_universe)
     logger.debug("SPY 20-day return used as market benchmark: %.2f%%", market_ret * 100)
 
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -1853,45 +1822,48 @@ def main(argv: Optional[List[str]] = None) -> int:
             0.50,
             0.50,
             market_ret,
-            [],
-            {},
+            options_stock_existing,
+            options_stock_flagged,
             entry_bar,
             displacement_margin,
         )
         fut_tfsa_stock = executor.submit(
             allocate_tfsa_stock_portfolio,
             tfsa_stock_histories,
-            float(ACCOUNT_CAPITALS.get("TFSA", 65_000.0)),
+            tfsa_available_cash,
             3,
             0.50,
             0.50,
             market_ret,
-            [],
-            {},
+            tfsa_stock_existing,
+            tfsa_stock_flagged,
             entry_bar,
             displacement_margin,
         )
         fut_rrsp = executor.submit(
             allocate_rrsp_portfolio,
             rrsp_histories,
-            float(ACCOUNT_CAPITALS.get("RRSP", 24_000.0)),
-            3,
-            0.50,
-            [],
-            {},
+            rrsp_available_cash,
+            # RRSP uses 4 positions (matching FHSA) but a lower max weight
+            # (0.45 vs FHSA 0.475 / TFSA 0.50) to keep stability bias while
+            # the tightened review policy consolidates weak names.
+            4,
+            0.45,
+            rrsp_existing,
+            rrsp_flagged,
             entry_bar,
             displacement_margin,
         )
         fut_fhsa_stock = executor.submit(
-            allocate_tfsa_stock_portfolio,
-            tfsa_stock_histories,
-            float(ACCOUNT_CAPITALS.get("FHSA", 36_000.0)),
-            3,
-            0.50,
+            allocate_fhsa_stock_portfolio,
+            fhsa_stock_histories,
+            fhsa_available_cash,
+            4,
+            0.475,
             0.50,
             market_ret,
-            [],
-            {},
+            fhsa_existing,
+            fhsa_flagged,
             entry_bar,
             displacement_margin,
         )
@@ -1955,7 +1927,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             rrsp=rrsp,
             holdings_review=reviews_df,
             portfolio_state_summary=state_summary,
-            options_performance=options_perf_df,
             rejected_candidates=rejected_candidates,
             entered_trades_count=entered_trades_count,
         )
@@ -2014,19 +1985,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             weekly_tfsa_stock = fut_m_tfsa_stock.result()
             weekly_rrsp = fut_m_rrsp.result()
 
-        weekly_options_summary = weekly_options_performance_summary(
-            state,
-            min_entry_score=entry_bar,
-            lookback_days=7,
-        )
-        _print_weekly_options_summary(weekly_options_summary)
-
         weekly_html = build_weekly_portfolio_email(
             tfsa_stock=weekly_tfsa_stock,
             rrsp=weekly_rrsp,
             tfsa_capital=tfsa_capital,
             rrsp_capital=rrsp_capital,
-            options_weekly_summary=weekly_options_summary,
         )
         weekly_subject = (
             f"Weekly Portfolio Review — week ending {date.today().strftime('%B %d, %Y')}"
@@ -2055,7 +2018,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "options_stock": _tfsa_stock_to_df(options_stock),
                 "rrsp": _rrsp_to_df(rrsp),
                 "fhsa_stock": _fhsa_stock_to_df(fhsa_stock),
-                "options_performance": options_perf_df,
             }
             meta_extra = {
                 "portfolio_manager": {

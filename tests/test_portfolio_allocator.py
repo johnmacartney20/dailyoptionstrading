@@ -156,6 +156,13 @@ def test_allocate_single_put():
     assert trade.pct_of_portfolio == 50.0
 
 
+def test_allocate_returns_no_trades_when_total_capital_is_zero():
+    df = _make_suggestions(_make_put_row("AAPL", score=60.0))
+    result = allocate_portfolio(df, total_capital=0.0)
+    assert result.num_open_trades == 0
+    assert result.total_deployed == 0.0
+
+
 def test_allocate_respects_sector_cap():
     """Two tech tickers should result in only one being selected."""
     df = _make_suggestions(
@@ -302,6 +309,13 @@ def test_tfsa_allocate_single_call():
     assert trade.max_loss == pytest.approx(100.0)
     # max_profit is unlimited (stored as 0.0)
     assert trade.max_profit == pytest.approx(0.0)
+
+
+def test_tfsa_allocate_returns_no_trades_when_total_capital_is_zero():
+    df = _make_suggestions(_make_call_row("AAPL", tfsa_score=70.0))
+    result = allocate_tfsa_portfolio(df, total_capital=0.0)
+    assert result.num_open_trades == 0
+    assert result.total_deployed == 0.0
 
 
 def test_tfsa_allocate_max_two_trades():

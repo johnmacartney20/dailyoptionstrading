@@ -329,6 +329,8 @@ def allocate_portfolio(
     :class:`PortfolioAllocation`
     """
     result = PortfolioAllocation(total_capital=total_capital)
+    if float(total_capital) <= 0:
+        return result
 
     if suggestions.empty:
         return result
@@ -539,6 +541,8 @@ def allocate_tfsa_portfolio(
     :class:`TfsaAllocation`
     """
     result = TfsaAllocation(total_capital=total_capital)
+    if float(total_capital) <= 0:
+        return result
 
     if suggestions.empty:
         return result
@@ -827,6 +831,8 @@ def allocate_tfsa_stock_portfolio(
     :class:`TfsaStockPortfolio`
     """
     result = TfsaStockPortfolio(total_capital=total_capital)
+    if float(total_capital) <= 0:
+        return result
     if not price_histories:
         return result
 
@@ -985,6 +991,55 @@ def allocate_tfsa_stock_portfolio(
     return result
 
 
+def allocate_fhsa_stock_portfolio(
+    price_histories: Dict[str, Optional[pd.DataFrame]],
+    total_capital: float = 1000.0,
+    max_positions: int = 4,
+    max_position_pct: float = 0.475,
+    max_sector_pct: float = 0.50,
+    market_return_20d: float = 0.0,
+    existing_holdings: Optional[List[str]] = None,
+    flagged_holdings_scores: Optional[Dict[str, float]] = None,
+    entry_score_min: float = 0.0,
+    displacement_margin: float = 0.0,
+) -> TfsaStockPortfolio:
+    """Select FHSA growth holdings with blended TFSA/RRSP sizing behavior."""
+    result = allocate_tfsa_stock_portfolio(
+        price_histories=price_histories,
+        total_capital=total_capital,
+        max_positions=max_positions,
+        max_position_pct=max_position_pct,
+        max_sector_pct=max_sector_pct,
+        market_return_20d=market_return_20d,
+        existing_holdings=existing_holdings,
+        flagged_holdings_scores=flagged_holdings_scores,
+        entry_score_min=entry_score_min,
+        displacement_margin=displacement_margin,
+    )
+    if not result.selected:
+        return result
+
+    scores = [max(float(p.composite_score), 0.0) for p in result.selected]
+    tfsa_allocs = _tfsa_concentrated_allocation(
+        len(result.selected),
+        total_capital,
+        max_single_pct=max_position_pct,
+    )
+    rrsp_allocs = _score_weighted_allocation(scores, total_capital, max_position_pct)
+    blended = [(a + b) / 2.0 for a, b in zip(tfsa_allocs, rrsp_allocs)]
+
+    total_blended = sum(blended)
+    if total_blended > 0:
+        scale = float(total_capital) / total_blended
+        blended = [v * scale for v in blended]
+
+    for idx, pos in enumerate(result.selected):
+        alloc = round(blended[idx], 2) if idx < len(blended) else 0.0
+        pos.allocation = alloc
+        pos.pct_of_portfolio = round((alloc / float(total_capital)) * 100, 1) if total_capital > 0 else 0.0
+    return result
+
+
 # ── RRSP allocation (stability model) ─────────────────────────────────────────
 
 @dataclass
@@ -1062,6 +1117,8 @@ def allocate_rrsp_portfolio(
     :class:`RrspPortfolio`
     """
     result = RrspPortfolio(total_capital=total_capital)
+    if float(total_capital) <= 0:
+        return result
     if not price_histories:
         return result
 

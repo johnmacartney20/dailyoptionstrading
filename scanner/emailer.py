@@ -331,7 +331,6 @@ def _render_daily_action_summary(
     tfsa_allocation: Optional[TfsaAllocation],
     tfsa_stock: Optional[TfsaStockPortfolio],
     rrsp: Optional[RrspPortfolio],
-    options_performance: Optional[pd.DataFrame],
     entered_trades_count: Optional[int] = None,
 ) -> str:
     review_df = holdings_review.copy() if holdings_review is not None else pd.DataFrame()
@@ -359,8 +358,6 @@ def _render_daily_action_summary(
     allocation_rows = _combined_allocation_rows(portfolio, tfsa_allocation, tfsa_stock, rrsp)
     new_trades = int(entered_trades_count) if entered_trades_count is not None else len(allocation_rows)
     trade_breakdown = _allocation_breakdown(allocation_rows)
-    total_pnl = _sum_numeric_column(options_performance, "unrealized_pnl")
-
     html = '<div class="daily-action">'
     html += '<h2>Action Summary</h2>'
 
@@ -386,7 +383,6 @@ def _render_daily_action_summary(
     if trade_breakdown:
         html += f" <span class='compact-note'>({trade_breakdown})</span>"
     html += "</p>"
-    html += f'<p class="action-line">Total P&amp;L: <strong>${total_pnl:+,.2f}</strong></p>'
     html += "</div>"
     return html
 
@@ -407,7 +403,7 @@ def _holdings_review_to_html(review_df: pd.DataFrame) -> str:
     if {"account", "account_capital", "pct_of_account", "verdict"}.issubset(set(review_df.columns)):
         live = review_df[~review_df["verdict"].astype(str).str.upper().str.startswith("EXIT")].copy()
         lines: List[str] = []
-        caps = {"TFSA": 8, "FHSA": 7, "RRSP": 5}
+        caps = {"TFSA": 5, "FHSA": 4, "RRSP": 4}
         for account in ["TFSA", "FHSA", "RRSP"]:
             sub = live[live["account"].astype(str).str.upper() == account]
             cap = float(pd.to_numeric(sub.get("account_capital"), errors="coerce").fillna(0.0).max()) if not sub.empty else 0.0
@@ -418,13 +414,13 @@ def _holdings_review_to_html(review_df: pd.DataFrame) -> str:
         options_cap = float(pd.to_numeric(options_live.get("account_capital"), errors="coerce").fillna(0.0).max()) if not options_live.empty else 20_000.0
         spreads = options_live[options_live["sub_portfolio"].astype(str).str.lower() == "put-spread"]
         stock = options_live[options_live["sub_portfolio"].astype(str).str.lower() != "put-spread"]
-        over = max(len(stock) - 3, 0)
+        over = max(len(stock) - 2, 0)
         opt_line = (
             f"OPTIONS: ${options_cap:,.0f} | Spreads ${options_cap * 0.50:,.0f} ({len(spreads)} open) | "
             f"Stock ${options_cap * 0.50:,.0f} ({len(stock)} positions"
         )
         if over > 0:
-            opt_line += ", over 3-name cap - trimming today"
+            opt_line += ", over 2-name cap - trimming today"
         opt_line += ")"
         lines.append(opt_line)
 
@@ -525,67 +521,6 @@ def _holdings_snapshot_to_html(positions_df: pd.DataFrame) -> str:
         rows += f"<tr>{cells}</tr>"
     html += f"<table><thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table>"
     html += "</div>"
-    return html
-
-
-def _options_performance_to_html(options_df: pd.DataFrame) -> str:
-    """Render daily options mark-to-market performance table body."""
-    html = ""
-
-    if options_df is None or options_df.empty:
-        html += "<p>No active option positions to track.</p>"
-        return html
-
-    cols = [
-        "ticker",
-        "account",
-        "option_type",
-        "expiry",
-        "qty",
-        "entry",
-        "mark",
-        "daily_change",
-        "unrealized_pnl",
-        "return_pct",
-        "dte",
-        "note",
-    ]
-    keep = [c for c in cols if c in options_df.columns]
-    display = options_df[keep].copy()
-
-    rename = {
-        "ticker": "Ticker",
-        "account": "Account",
-        "option_type": "Type",
-        "expiry": "Expiry",
-        "qty": "Qty",
-        "entry": "Entry",
-        "mark": "Mark",
-        "daily_change": "Day Δ",
-        "unrealized_pnl": "P&L $",
-        "return_pct": "Return %",
-        "dte": "DTE",
-        "note": "Note",
-    }
-    display.columns = [rename.get(c, c) for c in display.columns]
-
-    for col, decimals in [("Entry", 2), ("Mark", 2), ("Day Δ", 2), ("P&L $", 2), ("Return %", 2)]:
-        if col in display.columns:
-            display[col] = pd.to_numeric(display[col], errors="coerce").round(decimals)
-    if "Type" in display.columns:
-        display["Type"] = display["Type"].fillna("").astype(str).str.upper()
-
-    headers = "".join(f"<th>{h}</th>" for h in display.columns)
-    rows = ""
-    for _, row in display.iterrows():
-        cells = "".join(f"<td>{v}</td>" for v in row)
-        rows += f"<tr>{cells}</tr>"
-    html += f"<table><thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table>"
-
-    if "P&L $" in display.columns:
-        total = pd.to_numeric(display["P&L $"], errors="coerce").fillna(0.0).sum()
-        html += f"<p class='port-summary'>Total options unrealized P&amp;L: <strong>${total:+,.2f}</strong></p>"
-
     return html
 
 
@@ -1245,97 +1180,11 @@ def _weekly_allocation_section_html(
     return html
 
 
-def _weekly_options_section_html(options_weekly_summary: Dict[str, Any]) -> str:
-    """Return HTML for weekly high-conviction options performance."""
-    html = '<div class="section-box">'
-    html += "<h2>🧠 Section 5 — High-Conviction Options Performance</h2>"
-
-    rows = list((options_weekly_summary or {}).get("rows", []))
-    lookback = int((options_weekly_summary or {}).get("lookback_days", 7))
-    min_score = float((options_weekly_summary or {}).get("min_entry_score", 0.0))
-
-    html += (
-        f"<p class='meta'>Lookback: <strong>{lookback} days</strong>"
-        f" &nbsp;|&nbsp; Entry score floor: <strong>{min_score:.1f}</strong>"
-        f" &nbsp;|&nbsp; Tracked high-conviction options (not total holdings): "
-        f"<strong>{int((options_weekly_summary or {}).get('tracked_positions', 0))}</strong></p>"
-    )
-
-    if not rows:
-        html += "<p>No high-conviction options had performance history in this window.</p>"
-        html += "</div>"
-        return html
-
-    df = pd.DataFrame(rows)
-    cols = [
-        "ticker",
-        "account",
-        "option_type",
-        "expiry",
-        "qty",
-        "entry_score",
-        "start_mark",
-        "end_mark",
-        "weekly_pnl_change",
-        "unrealized_pnl",
-        "weekly_return_pct",
-        "days_captured",
-    ]
-    keep = [c for c in cols if c in df.columns]
-    display = df[keep].copy()
-    rename = {
-        "ticker": "Ticker",
-        "account": "Account",
-        "option_type": "Type",
-        "expiry": "Expiry",
-        "qty": "Qty",
-        "entry_score": "Entry Score",
-        "start_mark": "Start Mark",
-        "end_mark": "End Mark",
-        "weekly_pnl_change": "Week P&L Δ",
-        "unrealized_pnl": "Unrealized P&L",
-        "weekly_return_pct": "Week Return %",
-        "days_captured": "Days",
-    }
-    display.columns = [rename.get(c, c) for c in display.columns]
-
-    for col, decimals in [
-        ("Entry Score", 1),
-        ("Start Mark", 2),
-        ("End Mark", 2),
-        ("Week P&L Δ", 2),
-        ("Unrealized P&L", 2),
-        ("Week Return %", 2),
-    ]:
-        if col in display.columns:
-            display[col] = pd.to_numeric(display[col], errors="coerce").round(decimals)
-    if "Type" in display.columns:
-        display["Type"] = display["Type"].fillna("").astype(str).str.upper()
-
-    headers = "".join(f"<th>{h}</th>" for h in display.columns)
-    rows_html = ""
-    for _, row in display.iterrows():
-        cells = "".join(f"<td>{v}</td>" for v in row)
-        rows_html += f"<tr>{cells}</tr>"
-    html += f"<table><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table>"
-
-    html += (
-        f"<p class='meta'>Total weekly P&amp;L change: "
-        f"<strong>${float(options_weekly_summary.get('total_weekly_pnl_change', 0.0)):+,.2f}</strong>"
-        f" &nbsp;|&nbsp; Total unrealized P&amp;L: "
-        f"<strong>${float(options_weekly_summary.get('total_unrealized_pnl', 0.0)):+,.2f}</strong></p>"
-    )
-
-    html += "</div>"
-    return html
-
-
 def build_weekly_portfolio_email(
     tfsa_stock: TfsaStockPortfolio,
     rrsp: RrspPortfolio,
     tfsa_capital: float = 25_000.0,
     rrsp_capital: float = 25_000.0,
-    options_weekly_summary: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Return a complete HTML email for the weekly TFSA + RRSP portfolio review.
 
@@ -1349,8 +1198,6 @@ def build_weekly_portfolio_email(
        narrative for TFSA (growth) and RRSP (stability) separately.
      4. **Suggested Allocation for Next Week** — two tables (TFSA and RRSP) with
        ticker, sector, dollar allocation, portfolio %, and reasoning.
-     5. **High-Conviction Options Performance** — weekly mark/P&L table for
-         options entries that passed the conviction threshold.
 
     Parameters
     ----------
@@ -1362,8 +1209,6 @@ def build_weekly_portfolio_email(
         Total TFSA capital (default $25,000).
     rrsp_capital:
         Total RRSP capital (default $25,000).
-    options_weekly_summary:
-        Optional dict generated from portfolio state performance history.
     """
     today = date.today()
     week_ending = today.strftime("%B %d, %Y")
@@ -1380,8 +1225,6 @@ def build_weekly_portfolio_email(
     html += _weekly_insights_section_html(tfsa_stock, rrsp)
     html += _weekly_rebalance_section_html(tfsa_stock, rrsp)
     html += _weekly_allocation_section_html(tfsa_stock, rrsp, tfsa_capital, rrsp_capital)
-    if options_weekly_summary is not None:
-        html += _weekly_options_section_html(options_weekly_summary)
 
     html += _HTML_FOOT
     return html
@@ -1397,7 +1240,6 @@ def build_html_email(
     rrsp: Optional[RrspPortfolio] = None,
     holdings_review: Optional[pd.DataFrame] = None,
     portfolio_state_summary: Optional[Dict[str, Any]] = None,
-    options_performance: Optional[pd.DataFrame] = None,
     rejected_candidates: Optional[List[Dict[str, Any]]] = None,
     entered_trades_count: Optional[int] = None,
 ) -> str:
@@ -1412,7 +1254,6 @@ def build_html_email(
         tfsa_allocation=tfsa_allocation,
         tfsa_stock=tfsa_stock,
         rrsp=rrsp,
-        options_performance=options_performance,
         entered_trades_count=entered_trades_count,
     )
 
@@ -1422,12 +1263,6 @@ def build_html_email(
             _DAILY_REVIEW_DELTA_THRESHOLD,
         )
         html += _visible_section("Holdings Review", holdings_body)
-
-    if options_performance is not None:
-        html += _visible_section(
-            "Options Performance",
-            _options_performance_to_html(options_performance),
-        )
 
     allocation_rows = _combined_allocation_rows(portfolio, tfsa_allocation, tfsa_stock, rrsp)
     html += _visible_section(

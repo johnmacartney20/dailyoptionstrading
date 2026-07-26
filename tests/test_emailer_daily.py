@@ -83,38 +83,6 @@ def test_daily_email_prioritizes_actions_and_groups_rejections():
     tfsa_allocation = SimpleNamespace(selected=[_make_portfolio_item(ticker="AAPL", strategy_type="Buy long call", buy_strike=105.0, tfsa_score=93.5, allocation=300.0, pct_of_portfolio=30.0)])
     tfsa_stock = SimpleNamespace(selected=[_make_portfolio_item(ticker="MFC.TO", account="TFSA", action="Buy stock", current_price=57.05, composite_score=87.5, allocation=450.0, pct_of_portfolio=45.0)])
     rrsp = SimpleNamespace(selected=[_make_portfolio_item(ticker="RY.TO", account="RRSP", action="Buy stock", current_price=288.41, composite_score=95.0, allocation=500.0, pct_of_portfolio=50.0)])
-    options_performance = pd.DataFrame(
-        [
-            {
-                "ticker": "AAPL",
-                "account": "TFSA",
-                "option_type": "CALL",
-                "expiry": "2026-08-21",
-                "qty": 2,
-                "entry": 1.8,
-                "mark": 2.4,
-                "daily_change": 0.6,
-                "unrealized_pnl": 12.5,
-                "return_pct": 15.1,
-                "dte": 32,
-                "note": "tracking",
-            },
-            {
-                "ticker": "MSFT",
-                "account": "OPTIONS",
-                "option_type": "PUT",
-                "expiry": "2026-08-28",
-                "qty": 1,
-                "entry": 1.2,
-                "mark": 1.0,
-                "daily_change": -0.2,
-                "unrealized_pnl": 3.0,
-                "return_pct": 2.5,
-                "dte": 39,
-                "note": "tracking",
-            },
-        ]
-    )
     rejected_candidates = [
         {"ticker": "NVDA", "score": 90.0, "reason": "duplicate ticker"},
         {"ticker": "NVDA", "score": 89.0, "reason": "duplicate ticker"},
@@ -132,7 +100,6 @@ def test_daily_email_prioritizes_actions_and_groups_rejections():
         rrsp=rrsp,
         holdings_review=holdings_review,
         portfolio_state_summary={"total_positions": 3, "by_status": {"HOLD": 2, "FLAG": 0, "EXIT": 1}},
-        options_performance=options_performance,
         rejected_candidates=rejected_candidates,
     )
 
@@ -142,7 +109,6 @@ def test_daily_email_prioritizes_actions_and_groups_rejections():
     assert "1 actionable review(s) from 3 holdings" in html
     assert "NVDA" in html and "EXIT" in html
     assert "New trades entered: <strong>4</strong>" in html
-    assert "Total P&amp;L: <strong>$+15.50</strong>" in html
     assert "Model Holdings Snapshot" not in html
     assert "NVDA" in html and "2" in html and "duplicate ticker" in html
     assert "no available slots" in html
@@ -194,7 +160,6 @@ def test_daily_email_all_holdings_collapses_to_single_summary_line():
         exchange="tsx",
         holdings_review=holdings_review,
         portfolio_state_summary={"total_positions": 2, "by_status": {"HOLD": 2, "FLAG": 0, "EXIT": 0}},
-        options_performance=pd.DataFrame([{"unrealized_pnl": 0.0}]),
     )
 
     assert "2/2 HOLD, no action needed" in html

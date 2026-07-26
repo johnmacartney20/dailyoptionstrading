@@ -1,149 +1,17 @@
-"""Tests for options mark-to-market tracking in holdings_reviewer."""
+"""Tests for holdings review lifecycle and consolidation policies."""
 
-import pandas as pd
-import pytest
-
-from scanner.holdings_reviewer import (
-    account_health_summary_lines,
-    exited_capital_by_bucket,
-    review_holdings,
-    track_options_performance,
-)
-
-
-def _chain(calls_rows=None, puts_rows=None):
-    calls = pd.DataFrame(calls_rows or [])
-    puts = pd.DataFrame(puts_rows or [])
-    return calls, puts
-
-
-def test_track_options_performance_long_call_updates_metadata(monkeypatch):
-    """Long call mark/P&L should be computed and stored in metadata history."""
-
-    monkeypatch.setattr("scanner.holdings_reviewer.get_stock_price", lambda ticker: 100.0)
-    monkeypatch.setattr(
-        "scanner.holdings_reviewer.get_options_chain",
-        lambda ticker, expiry: _chain(
-            calls_rows=[{"strike": 100.0, "bid": 2.0, "ask": 2.2}],
-            puts_rows=[],
-        ),
-    )
-
-    position = {
-        "ticker": "AAPL",
-        "account_type": "TFSA",
-        "sub_portfolio": "long-call",
-        "entry_price": 1.5,
-        "quantity": 2,
-        "status": "HOLD",
-        "metadata": {
-            "option_type": "call",
-            "expiry": "2026-08-21",
-            "strike": 100.0,
-        },
-    }
-
-    df = track_options_performance([position], as_of="2026-07-06")
-
-    assert len(df) == 1
-    row = df.iloc[0]
-    assert row["ticker"] == "AAPL"
-    assert row["mark"] == pytest.approx(2.1)
-    # (2.1 - 1.5) * 100 * 2 contracts
-    assert row["unrealized_pnl"] == pytest.approx(120.0)
-
-    history = position["metadata"]["performance_history"]
-    assert len(history) == 1
-    assert history[0]["date"] == "2026-07-06"
-    assert history[0]["mark"] == pytest.approx(2.1)
-
-
-def test_track_options_performance_put_spread_uses_short_minus_long(monkeypatch):
-    """Credit spread mark should use short leg minus long leg."""
-
-    monkeypatch.setattr("scanner.holdings_reviewer.get_stock_price", lambda ticker: 50.0)
-    monkeypatch.setattr(
-        "scanner.holdings_reviewer.get_options_chain",
-        lambda ticker, expiry: _chain(
-            calls_rows=[],
-            puts_rows=[
-                {"strike": 45.0, "bid": 2.0, "ask": 2.2},
-                {"strike": 40.0, "bid": 0.6, "ask": 0.8},
-            ],
-        ),
-    )
-
-    position = {
-        "ticker": "RY.TO",
-        "account_type": "OPTIONS",
-        "sub_portfolio": "put-spread",
-        "entry_price": 1.5,  # entry credit
-        "quantity": 1,
-        "status": "HOLD",
-        "metadata": {
-            "option_type": "put",
-            "expiry": "2026-07-17",
-            "strike": 45.0,
-            "long_strike": 40.0,
-        },
-    }
-
-    df = track_options_performance([position], as_of="2026-07-06")
-
-    row = df.iloc[0]
-    # short mid 2.1 minus long mid 0.7 = 1.4
-    assert row["mark"] == pytest.approx(1.4)
-    # credit spread P&L = (entry - mark) * 100
-    assert row["unrealized_pnl"] == pytest.approx(10.0)
-
-
-def test_track_options_performance_overwrites_same_day_snapshot(monkeypatch):
-    """Running twice on the same date should not duplicate history rows."""
-
-    monkeypatch.setattr("scanner.holdings_reviewer.get_stock_price", lambda ticker: 110.0)
-    monkeypatch.setattr(
-        "scanner.holdings_reviewer.get_options_chain",
-        lambda ticker, expiry: _chain(
-            calls_rows=[{"strike": 100.0, "bid": 3.0, "ask": 3.2}],
-            puts_rows=[],
-        ),
-    )
-
-    position = {
-        "ticker": "MSFT",
-        "account_type": "TFSA",
-        "sub_portfolio": "long-call",
-        "entry_price": 2.5,
-        "quantity": 1,
-        "status": "HOLD",
-        "metadata": {
-            "option_type": "call",
-            "expiry": "2026-08-21",
-            "strike": 100.0,
-            "performance_history": [
-                {"date": "2026-07-05", "mark": 2.8},
-                {"date": "2026-07-06", "mark": 3.0},
-            ],
-        },
-    }
-
-    df = track_options_performance([position], as_of="2026-07-06")
-
-    history = position["metadata"]["performance_history"]
-    assert len(history) == 2
-    assert history[-1]["date"] == "2026-07-06"
-    # New mark should be midpoint of 3.0 and 3.2 -> 3.1
-    assert history[-1]["mark"] == pytest.approx(3.1)
-    # Day change should be vs prior day (2.8), not stale same-day row
-    assert df.iloc[0]["daily_change"] == pytest.approx(0.3)
+from scanner.holdings_reviewer import account_health_summary_lines, exited_capital_by_bucket, review_holdings
 
 
 def test_review_holdings_tier1_two_day_flag_and_immediate_exit(monkeypatch):
+    # Scores map to tightened policy bands:
+    # >=70 core HOLD, 60-70 trim-watch HOLD, 52-60 FLAG (exit on 2nd consecutive FLAG day),
+    # 45-52 severe FLAG auto-exit, <45 immediate EXIT.
     score_map = {
         "CORE": 70.0,
-        "TRIM": 55.0,
-        "FLAG2": 45.0,
-        "NOWEXIT": 30.0,
+        "TRIM_WATCH_SCORE": 63.0,
+        "FLAG_PERSISTENCE_SCORE": 58.0,
+        "SEVERE_FLAG_SCORE": 42.0,
     }
 
     monkeypatch.setattr(
@@ -164,7 +32,7 @@ def test_review_holdings_tier1_two_day_flag_and_immediate_exit(monkeypatch):
             "metadata": {},
         },
         {
-            "ticker": "TRIM",
+            "ticker": "TRIM_WATCH_SCORE",
             "account_type": "TFSA",
             "sub_portfolio": "growth",
             "entry_price": 100.0,
@@ -175,7 +43,7 @@ def test_review_holdings_tier1_two_day_flag_and_immediate_exit(monkeypatch):
             "metadata": {},
         },
         {
-            "ticker": "FLAG2",
+            "ticker": "FLAG_PERSISTENCE_SCORE",
             "account_type": "TFSA",
             "sub_portfolio": "growth",
             "entry_price": 100.0,
@@ -186,7 +54,7 @@ def test_review_holdings_tier1_two_day_flag_and_immediate_exit(monkeypatch):
             "metadata": {},
         },
         {
-            "ticker": "NOWEXIT",
+            "ticker": "SEVERE_FLAG_SCORE",
             "account_type": "RRSP",
             "sub_portfolio": "stability",
             "entry_price": 100.0,
@@ -208,12 +76,12 @@ def test_review_holdings_tier1_two_day_flag_and_immediate_exit(monkeypatch):
 
     assert by_ticker["CORE"].verdict == "HOLD"
     assert by_ticker["CORE"].verdict_tag == "HOLD"
-    assert by_ticker["TRIM"].verdict == "HOLD"
-    assert by_ticker["FLAG2"].verdict == "EXIT"
-    assert by_ticker["FLAG2"].verdict_tag == "EXIT (score)"
-    assert "2/2" in by_ticker["FLAG2"].reason
-    assert by_ticker["NOWEXIT"].verdict == "EXIT"
-    assert by_ticker["NOWEXIT"].verdict_tag == "EXIT (score)"
+    assert by_ticker["TRIM_WATCH_SCORE"].verdict == "HOLD"
+    assert by_ticker["FLAG_PERSISTENCE_SCORE"].verdict == "EXIT"
+    assert by_ticker["FLAG_PERSISTENCE_SCORE"].verdict_tag == "EXIT (score)"
+    assert "2/2" in by_ticker["FLAG_PERSISTENCE_SCORE"].reason
+    assert by_ticker["SEVERE_FLAG_SCORE"].verdict == "EXIT"
+    assert by_ticker["SEVERE_FLAG_SCORE"].verdict_tag == "EXIT (score)"
 
 
 def test_review_holdings_enforces_options_sleeve_caps_and_cross_account_note(monkeypatch):
@@ -299,7 +167,8 @@ def test_review_holdings_enforces_options_sleeve_caps_and_cross_account_note(mon
     options_stock = [r for r in reviews if r.account_type == "OPTIONS" and r.sub_portfolio == "growth"]
     options_spreads = [r for r in reviews if r.account_type == "OPTIONS" and r.sub_portfolio == "put-spread"]
 
-    assert sum(1 for r in options_stock if r.verdict == "EXIT" and r.verdict_tag == "EXIT (cap)") == 1
+    # OPTIONS stock sleeve cap is now 2 names, so 4 positions force 2 cap exits.
+    assert sum(1 for r in options_stock if r.verdict == "EXIT" and r.verdict_tag == "EXIT (cap)") == 2
     assert sum(1 for r in options_spreads if r.verdict == "EXIT" and r.verdict_tag == "EXIT (cap)") == 1
 
     amgn_rows = [r for r in reviews if r.ticker == "AMGN"]

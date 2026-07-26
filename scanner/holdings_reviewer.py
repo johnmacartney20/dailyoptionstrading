@@ -60,15 +60,18 @@ ACCOUNT_CAPITAL_DEFAULTS: Dict[str, float] = {
 }
 
 _CONCENTRATION_CAPS: Dict[str, int] = {
-    "TFSA": 8,
-    "FHSA": 7,
-    "RRSP": 5,
+    "TFSA": 5,
+    "FHSA": 4,
+    "RRSP": 4,
 }
 
 _OPTION_SLEEVE_CAPS: Dict[str, int] = {
     "spreads": 2,
-    "stock": 3,
+    "stock": 2,
 }
+# Splits the tightened FLAG band (45-60) into severe and standard urgency.
+# Scores in [45, 52) skip persistence and are exited on first breach.
+_SEVERE_FLAG_THRESHOLD: float = 52.0
 
 
 def _position_value(position: Dict[str, Any]) -> float:
@@ -273,237 +276,28 @@ def _days_to_expiry(expiry: str, as_of: date) -> Optional[int]:
     return max((exp_dt - as_of).days, 0)
 
 
-def track_options_performance(
-    positions: Sequence[Dict[str, Any]],
-    as_of: Optional[str] = None,
-) -> pd.DataFrame:
-    """Mark options positions to market and append one daily performance snapshot.
-
-    Mutates each position's ``metadata`` by updating ``performance_history`` and
-    last-known mark/P&L fields. Returns a report-friendly DataFrame.
-    """
-    as_of_date = date.today() if as_of is None else datetime.strptime(as_of, "%Y-%m-%d").date()
-    as_of_str = as_of_date.isoformat()
-
-    rows: List[Dict[str, Any]] = []
-    chain_cache: Dict[Tuple[str, str], Optional[Tuple[pd.DataFrame, pd.DataFrame]]] = {}
-    price_cache: Dict[str, Optional[float]] = {}
-
-    for pos in positions:
-        sub_portfolio = str(pos.get("sub_portfolio", "")).lower()
-        if sub_portfolio not in _OPTION_SUB_PORTFOLIOS:
-            continue
-
-        ticker = str(pos.get("ticker", "")).upper()
-        account = str(pos.get("account_type", ""))
-        status = str(pos.get("status", ""))
-        qty = int(max(int(pos.get("quantity", 1) or 1), 1))
-        entry_price = float(pos.get("entry_price", 0.0) or 0.0)
-
-        metadata = pos.setdefault("metadata", {})
-        option_type = str(metadata.get("option_type", "")).lower()
-        expiry = str(metadata.get("expiry", ""))
-        short_strike = _safe_float(metadata.get("strike"))
-        long_strike = _safe_float(metadata.get("long_strike"))
-
-        if not ticker or not option_type or not expiry or short_strike is None:
-            rows.append(
-                {
-                    "ticker": ticker,
-                    "account": account,
-                    "sub_portfolio": sub_portfolio,
-                    "option_type": option_type,
-                    "expiry": expiry,
-                    "strike": short_strike,
-                    "long_strike": long_strike,
-                    "qty": qty,
-                    "entry": entry_price,
-                    "mark": None,
-                    "daily_change": None,
-                    "unrealized_pnl": None,
-                    "return_pct": None,
-                    "underlying": None,
-                    "dte": None,
-                    "status": status,
-                    "note": "missing option metadata",
-                }
-            )
-            continue
-
-        if ticker not in price_cache:
-            price_cache[ticker] = get_stock_price(ticker)
-        underlying = price_cache[ticker]
-
-        cache_key = (ticker, expiry)
-        if cache_key not in chain_cache:
-            chain_cache[cache_key] = get_options_chain(ticker, expiry)
-        chain = chain_cache[cache_key]
-        if chain is None:
-            rows.append(
-                {
-                    "ticker": ticker,
-                    "account": account,
-                    "sub_portfolio": sub_portfolio,
-                    "option_type": option_type,
-                    "expiry": expiry,
-                    "strike": short_strike,
-                    "long_strike": long_strike,
-                    "qty": qty,
-                    "entry": round(entry_price, 4),
-                    "mark": None,
-                    "daily_change": None,
-                    "unrealized_pnl": None,
-                    "return_pct": None,
-                    "underlying": underlying,
-                    "dte": _days_to_expiry(expiry, as_of_date),
-                    "status": status,
-                    "note": "no options chain available",
-                }
-            )
-            continue
-
-        calls_df, puts_df = chain
-        options_df = calls_df if option_type == "call" else puts_df
-        short_row = _nearest_strike_row(options_df, short_strike)
-        if short_row is None:
-            rows.append(
-                {
-                    "ticker": ticker,
-                    "account": account,
-                    "sub_portfolio": sub_portfolio,
-                    "option_type": option_type,
-                    "expiry": expiry,
-                    "strike": short_strike,
-                    "long_strike": long_strike,
-                    "qty": qty,
-                    "entry": round(entry_price, 4),
-                    "mark": None,
-                    "daily_change": None,
-                    "unrealized_pnl": None,
-                    "return_pct": None,
-                    "underlying": underlying,
-                    "dte": _days_to_expiry(expiry, as_of_date),
-                    "status": status,
-                    "note": "could not locate strike in options chain",
-                }
-            )
-            continue
-
-        short_mid = _mid_from_row(short_row)
-        if short_mid is None:
-            rows.append(
-                {
-                    "ticker": ticker,
-                    "account": account,
-                    "sub_portfolio": sub_portfolio,
-                    "option_type": option_type,
-                    "expiry": expiry,
-                    "strike": short_strike,
-                    "long_strike": long_strike,
-                    "qty": qty,
-                    "entry": round(entry_price, 4),
-                    "mark": None,
-                    "daily_change": None,
-                    "unrealized_pnl": None,
-                    "return_pct": None,
-                    "underlying": underlying,
-                    "dte": _days_to_expiry(expiry, as_of_date),
-                    "status": status,
-                    "note": "missing bid/ask for strike",
-                }
-            )
-            continue
-
-        mark = float(short_mid)
-        note = "ok"
-        if sub_portfolio == "put-spread" and long_strike is not None:
-            long_row = _nearest_strike_row(options_df, long_strike)
-            long_mid = _mid_from_row(long_row) if long_row is not None else None
-            if long_mid is not None:
-                mark = max(short_mid - long_mid, 0.0)
-            else:
-                note = "long leg quote missing; using short-leg mark"
-
-        if sub_portfolio == "long-call":
-            pnl_per_contract = (mark - entry_price) * 100.0
-            basis = max(entry_price * 100.0, 1.0)
-        else:
-            pnl_per_contract = (entry_price - mark) * 100.0
-            basis = max(entry_price * 100.0, 1.0)
-
-        pnl_total = pnl_per_contract * qty
-        return_pct = (pnl_per_contract / basis) * 100.0
-
-        perf_hist = metadata.setdefault("performance_history", [])
-        prev_mark: Optional[float] = None
-        if perf_hist:
-            last = perf_hist[-1]
-            if str(last.get("date", "")) != as_of_str:
-                prev_mark = _safe_float(last.get("mark"))
-            else:
-                if len(perf_hist) >= 2:
-                    prev_mark = _safe_float(perf_hist[-2].get("mark"))
-                perf_hist.pop()
-        daily_change = None if prev_mark is None else (mark - prev_mark)
-
-        snapshot = {
-            "date": as_of_str,
-            "mark": round(mark, 4),
-            "daily_change": None if daily_change is None else round(daily_change, 4),
-            "pnl_per_contract": round(pnl_per_contract, 2),
-            "pnl_total": round(pnl_total, 2),
-            "return_pct": round(return_pct, 2),
-            "underlying": None if underlying is None else round(float(underlying), 4),
-            "dte": _days_to_expiry(expiry, as_of_date),
-            "status": status,
-        }
-        perf_hist.append(snapshot)
-        metadata["last_mark_date"] = as_of_str
-        metadata["last_mark"] = snapshot["mark"]
-        metadata["last_underlying_price"] = snapshot["underlying"]
-        metadata["last_option_pnl_total"] = snapshot["pnl_total"]
-        metadata["last_option_pnl_per_contract"] = snapshot["pnl_per_contract"]
-        metadata["last_option_return_pct"] = snapshot["return_pct"]
-
-        rows.append(
-            {
-                "ticker": ticker,
-                "account": account,
-                "sub_portfolio": sub_portfolio,
-                "option_type": option_type,
-                "expiry": expiry,
-                "strike": short_strike,
-                "long_strike": long_strike,
-                "qty": qty,
-                "entry": round(entry_price, 4),
-                "mark": snapshot["mark"],
-                "daily_change": snapshot["daily_change"],
-                "unrealized_pnl": snapshot["pnl_total"],
-                "return_pct": snapshot["return_pct"],
-                "underlying": snapshot["underlying"],
-                "dte": snapshot["dte"],
-                "status": status,
-                "note": note,
-            }
-        )
-
-    return pd.DataFrame(rows)
-
-
 def _tier1_verdict(current_score: float, prior_flag_days: int) -> Tuple[str, str, str]:
-    if current_score < 35.0:
-        return STATUS_EXIT, "EXIT (score)", f"score {current_score:.2f} < 35.00"
+    if current_score < 45.0:
+        return STATUS_EXIT, "EXIT (score)", f"score {current_score:.2f} < 45.00"
 
-    if current_score < 50.0:
+    if current_score < 60.0:
         new_count = prior_flag_days + 1
+        # Lower half of the FLAG band is treated as high urgency to reduce
+        # portfolio dilution from weak, small positions.
+        if current_score < _SEVERE_FLAG_THRESHOLD:
+            return (
+                STATUS_EXIT,
+                "EXIT (score)",
+                f"score {current_score:.2f} in severe FLAG band 45-{_SEVERE_FLAG_THRESHOLD:.0f}",
+            )
         if new_count >= 2:
             return STATUS_EXIT, "EXIT (score)", f"FLAG persistence {new_count}/2 days"
-        return STATUS_FLAG, f"FLAG ({new_count}/2 days)", f"score {current_score:.2f} in FLAG band 35-50"
+        return STATUS_FLAG, f"FLAG ({new_count}/2 days)", f"score {current_score:.2f} in FLAG band 45-60"
 
-    if current_score < 65.0:
-        return STATUS_HOLD, "HOLD", f"score {current_score:.2f} in trim-watch band 50-65"
+    if current_score < 70.0:
+        return STATUS_HOLD, "HOLD", f"score {current_score:.2f} in trim-watch band 60-70"
 
-    return STATUS_HOLD, "HOLD", f"score {current_score:.2f} core HOLD >= 65"
+    return STATUS_HOLD, "HOLD", f"score {current_score:.2f} core HOLD >= 70"
 
 
 def _enforce_concentration_caps(reviews: List[HoldingReview]) -> None:
