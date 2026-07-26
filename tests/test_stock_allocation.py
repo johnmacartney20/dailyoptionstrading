@@ -196,6 +196,14 @@ def test_tfsa_stock_none_histories_skipped():
     assert result.num_positions == 0
 
 
+def test_tfsa_stock_skips_nan_latest_close():
+    hist = _make_history(n_days=60, drift=0.003, vol=0.007)
+    hist.loc[hist.index[-1], "Close"] = np.nan
+    result = allocate_tfsa_stock_portfolio({"AAPL": hist}, total_capital=1000.0)
+    assert result.num_positions == 0
+    assert result.total_deployed == 0.0
+
+
 def test_tfsa_stock_single_position():
     hist = _make_history(n_days=60, drift=0.003, vol=0.007)
     result = allocate_tfsa_stock_portfolio({"AAPL": hist}, total_capital=1000.0)
@@ -301,6 +309,14 @@ def test_tfsa_stock_portfolio_dataclass_properties():
 
 def test_rrsp_empty_histories():
     result = allocate_rrsp_portfolio({})
+    assert result.num_positions == 0
+    assert result.total_deployed == 0.0
+
+
+def test_rrsp_skips_nan_latest_close():
+    hist = _make_history(n_days=60, drift=0.001, vol=0.006)
+    hist.loc[hist.index[-1], "Close"] = np.nan
+    result = allocate_rrsp_portfolio({"RY.TO": hist}, total_capital=1000.0)
     assert result.num_positions == 0
     assert result.total_deployed == 0.0
 
