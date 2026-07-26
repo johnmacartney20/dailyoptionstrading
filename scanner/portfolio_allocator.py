@@ -6,6 +6,7 @@ per-trade and per-sector concentration limits and inter-trade correlation
 exclusions.
 """
 
+import math
 import logging
 import re
 from dataclasses import dataclass, field
@@ -20,6 +21,10 @@ from .analyzer import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _is_positive_finite(value: float) -> bool:
+    return math.isfinite(float(value)) and float(value) > 0
 
 # ── Sector mapping ─────────────────────────────────────────────────────────────
 TICKER_SECTORS: Dict[str, str] = {
@@ -841,9 +846,12 @@ def allocate_tfsa_stock_portfolio(
     for ticker, hist in price_histories.items():
         if hist is None or hist.empty:
             continue
+        price = float(hist["Close"].iloc[-1])
+        if not _is_positive_finite(price):
+            logger.warning("Skipping %s for TFSA growth allocation due to invalid latest close: %r", ticker, price)
+            continue
         score = score_stock_growth(hist, market_return_20d)
-        if score.composite > 0:
-            price = float(hist["Close"].iloc[-1])
+        if _is_positive_finite(score.composite):
             candidates.append((ticker, price, score))
 
     # Sort by composite score descending
@@ -1126,9 +1134,12 @@ def allocate_rrsp_portfolio(
     for ticker, hist in price_histories.items():
         if hist is None or hist.empty:
             continue
+        price = float(hist["Close"].iloc[-1])
+        if not _is_positive_finite(price):
+            logger.warning("Skipping %s for RRSP stability allocation due to invalid latest close: %r", ticker, price)
+            continue
         score = score_stock_stability(hist)
-        if score.composite > 0:
-            price = float(hist["Close"].iloc[-1])
+        if _is_positive_finite(score.composite):
             candidates.append((ticker, price, score))
 
     candidates.sort(key=lambda x: x[2].composite, reverse=True)
