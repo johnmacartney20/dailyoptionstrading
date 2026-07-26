@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -442,95 +442,3 @@ def portfolio_summary(state: Dict[str, Any]) -> Dict[str, Any]:
         "by_status": by_status,
     }
 
-
-def weekly_options_performance_summary(
-    state: Dict[str, Any],
-    min_entry_score: float = 8.0,
-    lookback_days: int = 7,
-    as_of: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Summarize weekly performance for high-conviction options positions.
-
-    Uses each position's ``metadata.performance_history`` snapshots, which are
-    appended by the daily mark-to-market tracker.
-    """
-    as_of_date = date.today() if as_of is None else datetime.strptime(as_of, "%Y-%m-%d").date()
-    cutoff = as_of_date - timedelta(days=max(int(lookback_days), 1) - 1)
-
-    options_positions = [
-        p
-        for p in list(state.get("positions", [])) + list(state.get("closed_positions", []))
-        if str(p.get("sub_portfolio", "")).lower() in {"put-spread", "long-call"}
-    ]
-    high_conviction = [
-        p for p in options_positions if float(p.get("entry_composite_score", 0.0) or 0.0) >= float(min_entry_score)
-    ]
-
-    rows: List[Dict[str, Any]] = []
-    for pos in high_conviction:
-        metadata = pos.get("metadata", {}) or {}
-        history = metadata.get("performance_history", []) or []
-        if not isinstance(history, list) or not history:
-            continue
-
-        in_window: List[Dict[str, Any]] = []
-        for snap in history:
-            dt_raw = str(snap.get("date", ""))
-            try:
-                dt = datetime.strptime(dt_raw, "%Y-%m-%d").date()
-            except ValueError:
-                continue
-            if dt < cutoff or dt > as_of_date:
-                continue
-            in_window.append(snap)
-
-        if not in_window:
-            continue
-
-        in_window.sort(key=lambda s: str(s.get("date", "")))
-        first = in_window[0]
-        last = in_window[-1]
-
-        start_pnl = float(first.get("pnl_total", 0.0) or 0.0)
-        end_pnl = float(last.get("pnl_total", 0.0) or 0.0)
-        weekly_pnl_change = end_pnl - start_pnl
-
-        qty = int(max(int(pos.get("quantity", 1) or 1), 1))
-        entry = float(pos.get("entry_price", 0.0) or 0.0)
-        basis = max(entry * 100.0 * qty, 1.0)
-        weekly_return_pct = (weekly_pnl_change / basis) * 100.0
-
-        rows.append(
-            {
-                "ticker": str(pos.get("ticker", "")).upper(),
-                "account": str(pos.get("account_type", "")),
-                "sub_portfolio": str(pos.get("sub_portfolio", "")),
-                "option_type": str(metadata.get("option_type", "")).upper(),
-                "expiry": str(metadata.get("expiry", "")),
-                "qty": qty,
-                "entry_score": round(float(pos.get("entry_composite_score", 0.0) or 0.0), 2),
-                "entry": round(entry, 4),
-                "start_mark": float(first.get("mark", 0.0) or 0.0),
-                "end_mark": float(last.get("mark", 0.0) or 0.0),
-                "weekly_pnl_change": round(weekly_pnl_change, 2),
-                "unrealized_pnl": round(end_pnl, 2),
-                "weekly_return_pct": round(weekly_return_pct, 2),
-                "days_captured": int(len(in_window)),
-                "status": str(pos.get("status", "")),
-            }
-        )
-
-    rows.sort(key=lambda r: (r.get("weekly_pnl_change", 0.0), r.get("unrealized_pnl", 0.0)), reverse=True)
-
-    total_weekly_pnl = round(sum(float(r.get("weekly_pnl_change", 0.0) or 0.0) for r in rows), 2)
-    total_unrealized_pnl = round(sum(float(r.get("unrealized_pnl", 0.0) or 0.0) for r in rows), 2)
-
-    return {
-        "as_of": as_of_date.isoformat(),
-        "lookback_days": int(lookback_days),
-        "min_entry_score": float(min_entry_score),
-        "tracked_positions": len(rows),
-        "total_weekly_pnl_change": total_weekly_pnl,
-        "total_unrealized_pnl": total_unrealized_pnl,
-        "rows": rows,
-    }

@@ -73,7 +73,6 @@ from scanner.holdings_reviewer import (
     review_holdings,
     review_summary,
     reviews_to_frame,
-    track_options_performance,
 )
 from scanner.portfolio_allocator import (
     PortfolioAllocation,
@@ -98,7 +97,6 @@ from scanner.portfolio_state import (
     move_exited_positions,
     portfolio_summary,
     save_portfolio_state,
-    weekly_options_performance_summary,
 )
 from scanner.risk import (
     add_position_sizing_columns,
@@ -997,59 +995,6 @@ def _print_model_holdings_snapshot(state: dict) -> None:
     print(f"{sep}\n")
 
 
-def _print_options_performance(options_perf: pd.DataFrame) -> None:
-    """Pretty-print daily options mark-to-market performance."""
-    sep = "=" * 110
-    dash = "-" * 110
-
-    print(f"\n{sep}")
-    print("  OPTIONS PERFORMANCE  —  Daily Mark-to-Market")
-    print(sep)
-
-    if options_perf is None or options_perf.empty:
-        print("  No active option positions to track.")
-        print(f"{sep}\n")
-        return
-
-    display = options_perf.copy()
-    headers = [
-        "Ticker", "Acct", "Type", "Expiry", "Qty", "Entry", "Mark", "Day Δ", "P&L $", "Ret %", "DTE", "Note",
-    ]
-    col_w = [8, 6, 6, 10, 4, 7, 7, 7, 9, 7, 4, 28]
-    header_row = "  " + "  ".join(h.ljust(col_w[i]) for i, h in enumerate(headers))
-    print(header_row)
-    print("  " + dash[:len(header_row) - 2])
-
-    for _, r in display.iterrows():
-        entry = "-" if pd.isna(r.get("entry")) else f"{float(r.get('entry')):.2f}"
-        mark = "-" if pd.isna(r.get("mark")) else f"{float(r.get('mark')):.2f}"
-        day_change = "-" if pd.isna(r.get("daily_change")) else f"{float(r.get('daily_change')):+.2f}"
-        pnl = "-" if pd.isna(r.get("unrealized_pnl")) else f"{float(r.get('unrealized_pnl')):+.2f}"
-        ret_pct = "-" if pd.isna(r.get("return_pct")) else f"{float(r.get('return_pct')):+.1f}%"
-        dte = "-" if pd.isna(r.get("dte")) else str(int(r.get("dte")))
-        note = str(r.get("note", ""))[:28]
-        row = [
-            str(r.get("ticker", ""))[:8],
-            str(r.get("account", ""))[:6],
-            str(r.get("option_type", "")).upper()[:6],
-            str(r.get("expiry", ""))[:10],
-            str(int(r.get("qty", 0))) if not pd.isna(r.get("qty")) else "-",
-            entry,
-            mark,
-            day_change,
-            pnl,
-            ret_pct,
-            dte,
-            note,
-        ]
-        print("  " + "  ".join(str(v).ljust(col_w[i]) for i, v in enumerate(row)))
-
-    tracked = display[display["unrealized_pnl"].notna()]
-    total_pnl = float(tracked["unrealized_pnl"].sum()) if not tracked.empty else 0.0
-    print(f"\n  Total tracked options unrealized P&L: ${total_pnl:+,.2f}")
-    print(f"{sep}\n")
-
-
 def _print_compact_summary(
     suggestions: pd.DataFrame,
     portfolio: PortfolioAllocation,
@@ -1383,60 +1328,6 @@ def _print_rebalance_plan(plan: list[dict]) -> None:
     print(f"{sep}\n")
 
 
-def _print_weekly_options_summary(summary: dict) -> None:
-    """Print weekly high-conviction options performance summary."""
-    sep = "=" * 110
-    dash = "-" * 110
-    rows = list(summary.get("rows", []))
-
-    print(f"\n{sep}")
-    print("  WEEKLY OPTIONS PERFORMANCE  —  High-Conviction Trades")
-    print(sep)
-    print(
-        "  "
-        f"Lookback: {summary.get('lookback_days', 7)} days | "
-        f"Entry score floor: {float(summary.get('min_entry_score', 0.0)):.1f} | "
-        f"Tracked option positions (not total holdings): {int(summary.get('tracked_positions', 0))}"
-    )
-
-    if not rows:
-        print("  No high-conviction options with performance history in the lookback window.")
-        print(f"{sep}\n")
-        return
-
-    headers = [
-        "Ticker", "Acct", "Type", "Expiry", "Qty", "EntryScr", "Start", "End", "Wk P&L", "Unrl P&L", "Wk Ret", "Days",
-    ]
-    col_w = [8, 6, 6, 10, 4, 8, 7, 7, 8, 10, 7, 4]
-    header_row = "  " + "  ".join(h.ljust(col_w[i]) for i, h in enumerate(headers))
-    print(header_row)
-    print("  " + dash[:len(header_row) - 2])
-
-    for r in rows:
-        row = [
-            str(r.get("ticker", ""))[:8],
-            str(r.get("account", ""))[:6],
-            str(r.get("option_type", "")).upper()[:6],
-            str(r.get("expiry", ""))[:10],
-            str(int(r.get("qty", 0))),
-            f"{float(r.get('entry_score', 0.0)):.1f}",
-            f"{float(r.get('start_mark', 0.0)):.2f}",
-            f"{float(r.get('end_mark', 0.0)):.2f}",
-            f"{float(r.get('weekly_pnl_change', 0.0)):+.0f}",
-            f"{float(r.get('unrealized_pnl', 0.0)):+.0f}",
-            f"{float(r.get('weekly_return_pct', 0.0)):+.1f}%",
-            str(int(r.get("days_captured", 0))),
-        ]
-        print("  " + "  ".join(str(v).ljust(col_w[i]) for i, v in enumerate(row)))
-
-    print(
-        "\n  "
-        f"Total weekly P&L change: ${float(summary.get('total_weekly_pnl_change', 0.0)):+,.2f} | "
-        f"Total unrealized P&L: ${float(summary.get('total_unrealized_pnl', 0.0)):+,.2f}"
-    )
-    print(f"{sep}\n")
-
-
 def _active_noncash_position_keys(state: dict) -> set[tuple[str, str, str]]:
     """Return natural keys for active, non-cash positions."""
     keys: set[tuple[str, str, str]] = set()
@@ -1718,10 +1609,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         freed_capital.get("OPTIONS_stock", 0.0),
     )
     move_exited_positions(state)
-    open_positions = get_positions(state, statuses=[STATUS_HOLD, STATUS_FLAG])
-    options_perf_df = track_options_performance(open_positions)
     _print_model_holdings_snapshot(state)
-    _print_options_performance(options_perf_df)
 
     # ── Build ticker list ──────────────────────────────────────────────────────
     tickers: List[str] = []
@@ -2034,7 +1922,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             rrsp=rrsp,
             holdings_review=reviews_df,
             portfolio_state_summary=state_summary,
-            options_performance=options_perf_df,
             rejected_candidates=rejected_candidates,
             entered_trades_count=entered_trades_count,
         )
@@ -2093,19 +1980,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             weekly_tfsa_stock = fut_m_tfsa_stock.result()
             weekly_rrsp = fut_m_rrsp.result()
 
-        weekly_options_summary = weekly_options_performance_summary(
-            state,
-            min_entry_score=entry_bar,
-            lookback_days=7,
-        )
-        _print_weekly_options_summary(weekly_options_summary)
-
         weekly_html = build_weekly_portfolio_email(
             tfsa_stock=weekly_tfsa_stock,
             rrsp=weekly_rrsp,
             tfsa_capital=tfsa_capital,
             rrsp_capital=rrsp_capital,
-            options_weekly_summary=weekly_options_summary,
         )
         weekly_subject = (
             f"Weekly Portfolio Review — week ending {date.today().strftime('%B %d, %Y')}"
@@ -2134,7 +2013,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "options_stock": _tfsa_stock_to_df(options_stock),
                 "rrsp": _rrsp_to_df(rrsp),
                 "fhsa_stock": _fhsa_stock_to_df(fhsa_stock),
-                "options_performance": options_perf_df,
             }
             meta_extra = {
                 "portfolio_manager": {
