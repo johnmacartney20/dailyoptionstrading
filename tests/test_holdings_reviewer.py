@@ -166,6 +166,7 @@ def test_review_holdings_enforces_options_sleeve_caps_and_cross_account_note(mon
     options_stock = [r for r in reviews if r.account_type == "OPTIONS" and r.sub_portfolio == "growth"]
     options_spreads = [r for r in reviews if r.account_type == "OPTIONS" and r.sub_portfolio == "put-spread"]
 
+    # OPTIONS stock sleeve cap is now 2 names, so 4 positions force 2 cap exits.
     assert sum(1 for r in options_stock if r.verdict == "EXIT" and r.verdict_tag == "EXIT (cap)") == 2
     assert sum(1 for r in options_spreads if r.verdict == "EXIT" and r.verdict_tag == "EXIT (cap)") == 1
 

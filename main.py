@@ -1062,7 +1062,7 @@ def _position_book_value(pos: dict) -> float:
 
 
 def _available_account_cash(state: dict, account_type: str, account_capital: float) -> float:
-    """Return estimated deployable cash for one account after current holdings."""
+    """Return estimated deployable cash after non-cash HOLD/FLAG positions only."""
     deployed = 0.0
     for pos in state.get("positions", []):
         if str(pos.get("account_type", "")).upper() != account_type.upper():

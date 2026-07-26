@@ -69,6 +69,8 @@ _OPTION_SLEEVE_CAPS: Dict[str, int] = {
     "spreads": 2,
     "stock": 2,
 }
+# Splits the tightened FLAG band (45-60) into severe and standard urgency.
+# Scores below this threshold auto-exit immediately.
 _SEVERE_FLAG_THRESHOLD: float = 52.0
 
 
