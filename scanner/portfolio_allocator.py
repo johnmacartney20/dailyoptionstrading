@@ -329,6 +329,8 @@ def allocate_portfolio(
     :class:`PortfolioAllocation`
     """
     result = PortfolioAllocation(total_capital=total_capital)
+    if float(total_capital) <= 0:
+        return result
 
     if suggestions.empty:
         return result
@@ -539,6 +541,8 @@ def allocate_tfsa_portfolio(
     :class:`TfsaAllocation`
     """
     result = TfsaAllocation(total_capital=total_capital)
+    if float(total_capital) <= 0:
+        return result
 
     if suggestions.empty:
         return result
@@ -827,6 +831,8 @@ def allocate_tfsa_stock_portfolio(
     :class:`TfsaStockPortfolio`
     """
     result = TfsaStockPortfolio(total_capital=total_capital)
+    if float(total_capital) <= 0:
+        return result
     if not price_histories:
         return result
 
@@ -1062,6 +1068,8 @@ def allocate_rrsp_portfolio(
     :class:`RrspPortfolio`
     """
     result = RrspPortfolio(total_capital=total_capital)
+    if float(total_capital) <= 0:
+        return result
     if not price_histories:
         return result
 

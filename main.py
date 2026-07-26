@@ -1115,6 +1115,21 @@ def _position_book_value(pos: dict) -> float:
     return float(pos.get("entry_price", 0.0) or 0.0) * float(pos.get("quantity", 0.0) or 0.0)
 
 
+def _available_account_cash(state: dict, account_type: str, account_capital: float) -> float:
+    """Return estimated deployable cash for one account after current holdings."""
+    deployed = 0.0
+    for pos in state.get("positions", []):
+        if str(pos.get("account_type", "")).upper() != account_type.upper():
+            continue
+        if str(pos.get("status", "")).upper() not in {STATUS_HOLD, STATUS_FLAG}:
+            continue
+        metadata = pos.get("metadata", {}) or {}
+        if bool(metadata.get("is_cash", False)):
+            continue
+        deployed += max(_position_book_value(pos), 0.0)
+    return max(float(account_capital) - deployed, 0.0)
+
+
 def _ticker_family_key(ticker: str) -> str:
     """Normalize ticker variants so local/US listings can be compared together.
 
@@ -1778,9 +1793,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         sub_portfolio="put-spread",
         statuses=[STATUS_HOLD, STATUS_FLAG],
     )
+    options_stock_existing = get_holding_tickers(
+        state,
+        account_type="OPTIONS",
+        sub_portfolio="growth",
+        statuses=[STATUS_HOLD, STATUS_FLAG],
+    )
     tfsa_option_existing = get_holding_tickers(
         state,
         account_type="TFSA",
+        sub_portfolio="long-call",
         statuses=[STATUS_HOLD, STATUS_FLAG],
     )
     tfsa_stock_existing = get_holding_tickers(
@@ -1801,12 +1823,37 @@ def main(argv: Optional[List[str]] = None) -> int:
         sub_portfolio="growth",
         statuses=[STATUS_HOLD, STATUS_FLAG],
     )
+    options_flagged = _flagged_score_map(state, "OPTIONS", "put-spread")
+    options_stock_flagged = _flagged_score_map(state, "OPTIONS", "growth")
+    tfsa_options_flagged = _flagged_score_map(state, "TFSA", "long-call")
+    tfsa_stock_flagged = _flagged_score_map(state, "TFSA", "growth")
+    rrsp_flagged = _flagged_score_map(state, "RRSP", "stability")
+    fhsa_flagged = _flagged_score_map(state, "FHSA", "growth")
 
     # ── Options portfolio allocation ───────────────────────────────────────────
     # OPTIONS account uses a strict 50/50 split between spreads and stock sleeves.
-    options_total_capital = float(ACCOUNT_CAPITALS.get("NON_REGISTERED", 20_000.0))
+    options_total_capital = _available_account_cash(
+        state,
+        "OPTIONS",
+        float(ACCOUNT_CAPITALS.get("NON_REGISTERED", 20_000.0)),
+    )
     options_spreads_capital = options_total_capital * 0.50
     options_stock_capital = options_total_capital * 0.50
+    tfsa_available_cash = _available_account_cash(
+        state,
+        "TFSA",
+        float(ACCOUNT_CAPITALS.get("TFSA", 65_000.0)),
+    )
+    rrsp_available_cash = _available_account_cash(
+        state,
+        "RRSP",
+        float(ACCOUNT_CAPITALS.get("RRSP", 24_000.0)),
+    )
+    fhsa_available_cash = _available_account_cash(
+        state,
+        "FHSA",
+        float(ACCOUNT_CAPITALS.get("FHSA", 36_000.0)),
+    )
 
     # Both options allocations are independent — run them in parallel.
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -1815,18 +1862,18 @@ def main(argv: Optional[List[str]] = None) -> int:
             suggestions,
             total_capital=options_spreads_capital,
             max_trades=2,
-            existing_holdings=[],
-            flagged_holdings_scores={},
+            existing_holdings=options_existing,
+            flagged_holdings_scores=options_flagged,
             entry_score_min=entry_bar,
             displacement_margin=displacement_margin,
         )
         fut_tfsa_opts = executor.submit(
             allocate_tfsa_portfolio,
             suggestions,
-            total_capital=float(ACCOUNT_CAPITALS.get("TFSA", 65_000.0)),
+            total_capital=tfsa_available_cash,
             max_trades=0,
-            existing_holdings=[],
-            flagged_holdings_scores={},
+            existing_holdings=tfsa_option_existing,
+            flagged_holdings_scores=tfsa_options_flagged,
             entry_score_min=entry_bar,
             displacement_margin=displacement_margin,
         )
@@ -1853,45 +1900,45 @@ def main(argv: Optional[List[str]] = None) -> int:
             0.50,
             0.50,
             market_ret,
-            [],
-            {},
+            options_stock_existing,
+            options_stock_flagged,
             entry_bar,
             displacement_margin,
         )
         fut_tfsa_stock = executor.submit(
             allocate_tfsa_stock_portfolio,
             tfsa_stock_histories,
-            float(ACCOUNT_CAPITALS.get("TFSA", 65_000.0)),
+            tfsa_available_cash,
             3,
             0.50,
             0.50,
             market_ret,
-            [],
-            {},
+            tfsa_stock_existing,
+            tfsa_stock_flagged,
             entry_bar,
             displacement_margin,
         )
         fut_rrsp = executor.submit(
             allocate_rrsp_portfolio,
             rrsp_histories,
-            float(ACCOUNT_CAPITALS.get("RRSP", 24_000.0)),
+            rrsp_available_cash,
             3,
             0.50,
-            [],
-            {},
+            rrsp_existing,
+            rrsp_flagged,
             entry_bar,
             displacement_margin,
         )
         fut_fhsa_stock = executor.submit(
             allocate_tfsa_stock_portfolio,
             tfsa_stock_histories,
-            float(ACCOUNT_CAPITALS.get("FHSA", 36_000.0)),
+            fhsa_available_cash,
             3,
             0.50,
             0.50,
             market_ret,
-            [],
-            {},
+            fhsa_existing,
+            fhsa_flagged,
             entry_bar,
             displacement_margin,
         )

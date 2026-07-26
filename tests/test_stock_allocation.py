@@ -207,6 +207,13 @@ def test_tfsa_stock_single_position():
     assert trade.pct_of_portfolio == pytest.approx(50.0)
 
 
+def test_tfsa_stock_zero_capital_returns_no_positions():
+    hist = _make_history(n_days=60, drift=0.003, vol=0.007)
+    result = allocate_tfsa_stock_portfolio({"AAPL": hist}, total_capital=0.0)
+    assert result.num_positions == 0
+    assert result.total_deployed == 0.0
+
+
 def test_tfsa_stock_respects_sector_cap():
     """Two Technology tickers → only the higher-scored one is selected."""
     hist_aapl = _make_history(n_days=60, drift=0.005, vol=0.007, seed=1)
@@ -306,6 +313,13 @@ def test_rrsp_single_position():
     assert trade.allocation == pytest.approx(500.0)  # capped at 50%
     assert isinstance(trade.long_term_thesis, str)
     assert len(trade.long_term_thesis) > 0
+
+
+def test_rrsp_zero_capital_returns_no_positions():
+    hist = _make_history(n_days=60, drift=0.001, vol=0.006)
+    result = allocate_rrsp_portfolio({"RY.TO": hist}, total_capital=0.0)
+    assert result.num_positions == 0
+    assert result.total_deployed == 0.0
 
 
 def test_rrsp_respects_sector_cap():
