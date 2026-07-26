@@ -851,7 +851,7 @@ def allocate_tfsa_stock_portfolio(
             logger.warning("Skipping %s for TFSA growth allocation due to invalid latest close: %r", ticker, price)
             continue
         score = score_stock_growth(hist, market_return_20d)
-        if _is_positive_finite(score.composite):
+        if math.isfinite(float(score.composite)) and score.composite > 0:
             candidates.append((ticker, price, score))
 
     # Sort by composite score descending
@@ -1139,7 +1139,7 @@ def allocate_rrsp_portfolio(
             logger.warning("Skipping %s for RRSP stability allocation due to invalid latest close: %r", ticker, price)
             continue
         score = score_stock_stability(hist)
-        if _is_positive_finite(score.composite):
+        if math.isfinite(float(score.composite)) and score.composite > 0:
             candidates.append((ticker, price, score))
 
     candidates.sort(key=lambda x: x[2].composite, reverse=True)
