@@ -31,6 +31,7 @@ Usage examples
 """
 
 import argparse
+import math
 import logging
 import os
 import json
@@ -380,6 +381,37 @@ def _record_new_entries(
     fhsa_stock: TfsaStockPortfolio,
 ) -> None:
     """Write newly selected positions into persistent state."""
+    def _safe_quantity(
+        allocation: float,
+        unit_cost: float,
+        *,
+        ticker: str,
+        account_type: str,
+        sub_portfolio: str,
+        min_unit_cost: float,
+    ) -> Optional[int]:
+        allocation_value = float(allocation)
+        if not math.isfinite(allocation_value):
+            logger.warning(
+                "Skipping %s %s/%s entry due to non-finite allocation: %r",
+                ticker,
+                account_type,
+                sub_portfolio,
+                allocation,
+            )
+            return None
+        unit_cost_value = float(unit_cost)
+        if not math.isfinite(unit_cost_value):
+            logger.warning(
+                "Skipping %s %s/%s entry due to non-finite unit cost: %r",
+                ticker,
+                account_type,
+                sub_portfolio,
+                unit_cost,
+            )
+            return None
+        return max(int(allocation_value // max(unit_cost_value, min_unit_cost)), 1)
+
     managed_keys = {
         ("OPTIONS", "put-spread"),
         ("OPTIONS", "growth"),
@@ -402,7 +434,16 @@ def _record_new_entries(
     state["positions"] = kept_positions
 
     for t in portfolio.selected:
-        qty = max(int(t.allocation // max(t.max_loss, 1.0)), 1)
+        qty = _safe_quantity(
+            t.allocation,
+            t.max_loss,
+            ticker=t.ticker,
+            account_type="OPTIONS",
+            sub_portfolio="put-spread",
+            min_unit_cost=1.0,
+        )
+        if qty is None:
+            continue
         add_or_update_position(
             state,
             build_position(
@@ -425,7 +466,16 @@ def _record_new_entries(
         )
 
     for t in options_stock.selected:
-        qty = max(int(t.allocation // max(t.current_price, 0.01)), 1)
+        qty = _safe_quantity(
+            t.allocation,
+            t.current_price,
+            ticker=t.ticker,
+            account_type="OPTIONS",
+            sub_portfolio="growth",
+            min_unit_cost=0.01,
+        )
+        if qty is None:
+            continue
         add_or_update_position(
             state,
             build_position(
@@ -444,7 +494,16 @@ def _record_new_entries(
         )
 
     for t in tfsa_opts.selected:
-        qty = max(int(t.allocation // max(t.max_loss, 1.0)), 1)
+        qty = _safe_quantity(
+            t.allocation,
+            t.max_loss,
+            ticker=t.ticker,
+            account_type="TFSA",
+            sub_portfolio="long-call",
+            min_unit_cost=1.0,
+        )
+        if qty is None:
+            continue
         add_or_update_position(
             state,
             build_position(
@@ -464,7 +523,16 @@ def _record_new_entries(
         )
 
     for t in tfsa_stock.selected:
-        qty = max(int(t.allocation // max(t.current_price, 0.01)), 1)
+        qty = _safe_quantity(
+            t.allocation,
+            t.current_price,
+            ticker=t.ticker,
+            account_type="TFSA",
+            sub_portfolio="growth",
+            min_unit_cost=0.01,
+        )
+        if qty is None:
+            continue
         add_or_update_position(
             state,
             build_position(
@@ -479,7 +547,16 @@ def _record_new_entries(
         )
 
     for t in rrsp.selected:
-        qty = max(int(t.allocation // max(t.current_price, 0.01)), 1)
+        qty = _safe_quantity(
+            t.allocation,
+            t.current_price,
+            ticker=t.ticker,
+            account_type="RRSP",
+            sub_portfolio="stability",
+            min_unit_cost=0.01,
+        )
+        if qty is None:
+            continue
         add_or_update_position(
             state,
             build_position(
@@ -494,7 +571,16 @@ def _record_new_entries(
         )
 
     for t in fhsa_stock.selected:
-        qty = max(int(t.allocation // max(t.current_price, 0.01)), 1)
+        qty = _safe_quantity(
+            t.allocation,
+            t.current_price,
+            ticker=t.ticker,
+            account_type="FHSA",
+            sub_portfolio="growth",
+            min_unit_cost=0.01,
+        )
+        if qty is None:
+            continue
         add_or_update_position(
             state,
             build_position(

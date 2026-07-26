@@ -7,6 +7,7 @@ HOLD/FLAG/EXIT verdicts from configurable thresholds.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -277,6 +278,8 @@ def _days_to_expiry(expiry: str, as_of: date) -> Optional[int]:
 
 
 def _tier1_verdict(current_score: float, prior_flag_days: int) -> Tuple[str, str, str]:
+    if not math.isfinite(current_score):
+        return STATUS_HOLD, "HOLD", "score unavailable (non-finite); keeping position unchanged"
     if current_score < 45.0:
         return STATUS_EXIT, "EXIT (score)", f"score {current_score:.2f} < 45.00"
 

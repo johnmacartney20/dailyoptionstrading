@@ -7,10 +7,13 @@ import pytest
 
 from scanner.portfolio_allocator import (
     PortfolioAllocation,
+    RrspPortfolio,
     TradeAllocation,
     RejectedCandidate,
+    StockAllocation,
     TfsaTradeAllocation,
     TfsaAllocation,
+    TfsaStockPortfolio,
     _are_correlated,
     _MAX_DTE_SPREAD,
     _TFSA_LONG_CALL_MIN_DTE,
@@ -19,7 +22,9 @@ from scanner.portfolio_allocator import (
     _parse_sell_strike_tfsa,
     _score_weighted_allocation,
     allocate_portfolio,
+    allocate_rrsp_portfolio,
     allocate_tfsa_portfolio,
+    allocate_tfsa_stock_portfolio,
 )
 
 
@@ -233,6 +238,46 @@ def test_allocate_portfolio_dataclass_properties():
     )
     assert pa.num_open_trades == 1
     assert pa.total_deployed == 500.0
+
+
+def test_allocate_tfsa_stock_portfolio_skips_non_finite_scores(monkeypatch):
+    hist = pd.DataFrame({"Close": [100.0, 101.0], "Volume": [1_000_000, 1_000_000]})
+
+    class MockScore:
+        def __init__(self, composite: float, reasoning: str) -> None:
+            self.composite = composite
+            self.reasoning = reasoning
+
+    monkeypatch.setattr(
+        "scanner.portfolio_allocator.score_stock_growth",
+        lambda hist, market_return_20d: MockScore(float("nan"), "bad data"),
+    )
+
+    result = allocate_tfsa_stock_portfolio({"AAPL": hist}, total_capital=1000.0)
+
+    assert isinstance(result, TfsaStockPortfolio)
+    assert result.selected == []
+    assert result.rejected == []
+
+
+def test_allocate_rrsp_portfolio_skips_non_finite_scores(monkeypatch):
+    hist = pd.DataFrame({"Close": [100.0, 101.0], "Volume": [1_000_000, 1_000_000]})
+
+    class MockScore:
+        def __init__(self, composite: float, reasoning: str) -> None:
+            self.composite = composite
+            self.reasoning = reasoning
+
+    monkeypatch.setattr(
+        "scanner.portfolio_allocator.score_stock_stability",
+        lambda hist: MockScore(float("nan"), "bad data"),
+    )
+
+    result = allocate_rrsp_portfolio({"AAPL": hist}, total_capital=1000.0)
+
+    assert isinstance(result, RrspPortfolio)
+    assert result.selected == []
+    assert result.rejected == []
 
 
 # ── _parse_sell_strike_tfsa ───────────────────────────────────────────────────
