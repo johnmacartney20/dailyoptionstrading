@@ -141,9 +141,9 @@ def test_track_options_performance_overwrites_same_day_snapshot(monkeypatch):
 def test_review_holdings_tier1_two_day_flag_and_immediate_exit(monkeypatch):
     score_map = {
         "CORE": 70.0,
-        "TRIM": 55.0,
-        "FLAG2": 45.0,
-        "NOWEXIT": 30.0,
+        "TRIM": 63.0,
+        "FLAG2": 58.0,
+        "NOWEXIT": 42.0,
     }
 
     monkeypatch.setattr(
@@ -299,7 +299,7 @@ def test_review_holdings_enforces_options_sleeve_caps_and_cross_account_note(mon
     options_stock = [r for r in reviews if r.account_type == "OPTIONS" and r.sub_portfolio == "growth"]
     options_spreads = [r for r in reviews if r.account_type == "OPTIONS" and r.sub_portfolio == "put-spread"]
 
-    assert sum(1 for r in options_stock if r.verdict == "EXIT" and r.verdict_tag == "EXIT (cap)") == 1
+    assert sum(1 for r in options_stock if r.verdict == "EXIT" and r.verdict_tag == "EXIT (cap)") == 2
     assert sum(1 for r in options_spreads if r.verdict == "EXIT" and r.verdict_tag == "EXIT (cap)") == 1
 
     amgn_rows = [r for r in reviews if r.ticker == "AMGN"]

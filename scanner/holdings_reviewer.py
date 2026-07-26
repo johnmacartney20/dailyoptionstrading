@@ -60,14 +60,14 @@ ACCOUNT_CAPITAL_DEFAULTS: Dict[str, float] = {
 }
 
 _CONCENTRATION_CAPS: Dict[str, int] = {
-    "TFSA": 8,
-    "FHSA": 7,
-    "RRSP": 5,
+    "TFSA": 5,
+    "FHSA": 4,
+    "RRSP": 4,
 }
 
 _OPTION_SLEEVE_CAPS: Dict[str, int] = {
     "spreads": 2,
-    "stock": 3,
+    "stock": 2,
 }
 
 
@@ -491,19 +491,21 @@ def track_options_performance(
 
 
 def _tier1_verdict(current_score: float, prior_flag_days: int) -> Tuple[str, str, str]:
-    if current_score < 35.0:
-        return STATUS_EXIT, "EXIT (score)", f"score {current_score:.2f} < 35.00"
+    if current_score < 45.0:
+        return STATUS_EXIT, "EXIT (score)", f"score {current_score:.2f} < 45.00"
 
-    if current_score < 50.0:
+    if current_score < 60.0:
         new_count = prior_flag_days + 1
+        if current_score < 52.0:
+            return STATUS_EXIT, "EXIT (score)", f"score {current_score:.2f} in severe FLAG band 45-52"
         if new_count >= 2:
             return STATUS_EXIT, "EXIT (score)", f"FLAG persistence {new_count}/2 days"
-        return STATUS_FLAG, f"FLAG ({new_count}/2 days)", f"score {current_score:.2f} in FLAG band 35-50"
+        return STATUS_FLAG, f"FLAG ({new_count}/2 days)", f"score {current_score:.2f} in FLAG band 45-60"
 
-    if current_score < 65.0:
-        return STATUS_HOLD, "HOLD", f"score {current_score:.2f} in trim-watch band 50-65"
+    if current_score < 70.0:
+        return STATUS_HOLD, "HOLD", f"score {current_score:.2f} in trim-watch band 60-70"
 
-    return STATUS_HOLD, "HOLD", f"score {current_score:.2f} core HOLD >= 65"
+    return STATUS_HOLD, "HOLD", f"score {current_score:.2f} core HOLD >= 70"
 
 
 def _enforce_concentration_caps(reviews: List[HoldingReview]) -> None:
