@@ -84,6 +84,36 @@ def test_review_holdings_tier1_two_day_flag_and_immediate_exit(monkeypatch):
     assert by_ticker["SEVERE_FLAG_SCORE"].verdict_tag == "EXIT (score)"
 
 
+def test_review_holdings_non_finite_score_holds_with_explicit_reason(monkeypatch):
+    monkeypatch.setattr(
+        "scanner.holdings_reviewer._score_position",
+        lambda pos, market_return_20d: (float("nan"), "mock"),
+    )
+
+    reviews = review_holdings(
+        [
+            {
+                "ticker": "AAPL",
+                "account_type": "TFSA",
+                "sub_portfolio": "growth",
+                "entry_price": 100.0,
+                "quantity": 10,
+                "entry_composite_score": 66.0,
+                "entry_date": "2026-07-01",
+                "review_history": [],
+                "metadata": {},
+            }
+        ],
+        thresholds={},
+        market_return_20d=0.0,
+        account_capitals={"TFSA": 65_000.0},
+    )
+
+    assert reviews[0].verdict == "HOLD"
+    assert reviews[0].verdict_tag == "HOLD"
+    assert "non-finite" in reviews[0].reason
+
+
 def test_review_holdings_enforces_options_sleeve_caps_and_cross_account_note(monkeypatch):
     score_map = {
         "S1": 80.0,
