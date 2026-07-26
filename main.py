@@ -1844,8 +1844,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             allocate_rrsp_portfolio,
             rrsp_histories,
             rrsp_available_cash,
-            # RRSP uses the same slot count as FHSA but a lower max weight than TFSA/FHSA
-            # to keep stability bias while the tightened review policy consolidates weak names.
+            # RRSP uses 4 positions (matching FHSA) but a lower max weight
+            # (0.45 vs FHSA 0.475 / TFSA 0.50) to keep stability bias while
+            # the tightened review policy consolidates weak names.
             4,
             0.45,
             rrsp_existing,

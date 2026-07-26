@@ -9,9 +9,9 @@ def test_review_holdings_tier1_two_day_flag_and_immediate_exit(monkeypatch):
     # 45-52 severe FLAG auto-exit, <45 immediate EXIT.
     score_map = {
         "CORE": 70.0,
-        "TRIM": 63.0,
-        "FLAG2": 58.0,
-        "NOWEXIT": 42.0,
+        "TRIM_WATCH_SCORE": 63.0,
+        "FLAG_PERSISTENCE_SCORE": 58.0,
+        "SEVERE_FLAG_SCORE": 42.0,
     }
 
     monkeypatch.setattr(
@@ -32,7 +32,7 @@ def test_review_holdings_tier1_two_day_flag_and_immediate_exit(monkeypatch):
             "metadata": {},
         },
         {
-            "ticker": "TRIM",
+            "ticker": "TRIM_WATCH_SCORE",
             "account_type": "TFSA",
             "sub_portfolio": "growth",
             "entry_price": 100.0,
@@ -43,7 +43,7 @@ def test_review_holdings_tier1_two_day_flag_and_immediate_exit(monkeypatch):
             "metadata": {},
         },
         {
-            "ticker": "FLAG2",
+            "ticker": "FLAG_PERSISTENCE_SCORE",
             "account_type": "TFSA",
             "sub_portfolio": "growth",
             "entry_price": 100.0,
@@ -54,7 +54,7 @@ def test_review_holdings_tier1_two_day_flag_and_immediate_exit(monkeypatch):
             "metadata": {},
         },
         {
-            "ticker": "NOWEXIT",
+            "ticker": "SEVERE_FLAG_SCORE",
             "account_type": "RRSP",
             "sub_portfolio": "stability",
             "entry_price": 100.0,
@@ -76,12 +76,12 @@ def test_review_holdings_tier1_two_day_flag_and_immediate_exit(monkeypatch):
 
     assert by_ticker["CORE"].verdict == "HOLD"
     assert by_ticker["CORE"].verdict_tag == "HOLD"
-    assert by_ticker["TRIM"].verdict == "HOLD"
-    assert by_ticker["FLAG2"].verdict == "EXIT"
-    assert by_ticker["FLAG2"].verdict_tag == "EXIT (score)"
-    assert "2/2" in by_ticker["FLAG2"].reason
-    assert by_ticker["NOWEXIT"].verdict == "EXIT"
-    assert by_ticker["NOWEXIT"].verdict_tag == "EXIT (score)"
+    assert by_ticker["TRIM_WATCH_SCORE"].verdict == "HOLD"
+    assert by_ticker["FLAG_PERSISTENCE_SCORE"].verdict == "EXIT"
+    assert by_ticker["FLAG_PERSISTENCE_SCORE"].verdict_tag == "EXIT (score)"
+    assert "2/2" in by_ticker["FLAG_PERSISTENCE_SCORE"].reason
+    assert by_ticker["SEVERE_FLAG_SCORE"].verdict == "EXIT"
+    assert by_ticker["SEVERE_FLAG_SCORE"].verdict_tag == "EXIT (score)"
 
 
 def test_review_holdings_enforces_options_sleeve_caps_and_cross_account_note(monkeypatch):

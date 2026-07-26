@@ -70,7 +70,7 @@ _OPTION_SLEEVE_CAPS: Dict[str, int] = {
     "stock": 2,
 }
 # Splits the tightened FLAG band (45-60) into severe and standard urgency.
-# Scores below this threshold skip persistence and are exited on first breach.
+# Scores in [45, 52) skip persistence and are exited on first breach.
 _SEVERE_FLAG_THRESHOLD: float = 52.0
 
 
