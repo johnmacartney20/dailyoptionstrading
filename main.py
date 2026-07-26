@@ -390,7 +390,8 @@ def _record_new_entries(
         sub_portfolio: str,
         min_unit_cost: float,
     ) -> Optional[int]:
-        if not math.isfinite(float(allocation)):
+        allocation_value = float(allocation)
+        if not math.isfinite(allocation_value):
             logger.warning(
                 "Skipping %s %s/%s entry due to non-finite allocation: %r",
                 ticker,
@@ -399,7 +400,8 @@ def _record_new_entries(
                 allocation,
             )
             return None
-        if not math.isfinite(float(unit_cost)):
+        unit_cost_value = float(unit_cost)
+        if not math.isfinite(unit_cost_value):
             logger.warning(
                 "Skipping %s %s/%s entry due to non-finite unit cost: %r",
                 ticker,
@@ -408,7 +410,7 @@ def _record_new_entries(
                 unit_cost,
             )
             return None
-        return max(int(float(allocation) // max(float(unit_cost), min_unit_cost)), 1)
+        return max(int(allocation_value // max(unit_cost_value, min_unit_cost)), 1)
 
     managed_keys = {
         ("OPTIONS", "put-spread"),
