@@ -69,6 +69,7 @@ _OPTION_SLEEVE_CAPS: Dict[str, int] = {
     "spreads": 2,
     "stock": 2,
 }
+_SEVERE_FLAG_THRESHOLD: float = 52.0
 
 
 def _position_value(position: Dict[str, Any]) -> float:
@@ -281,8 +282,12 @@ def _tier1_verdict(current_score: float, prior_flag_days: int) -> Tuple[str, str
         new_count = prior_flag_days + 1
         # Lower half of the FLAG band is treated as high urgency to reduce
         # portfolio dilution from weak, small positions.
-        if current_score < 52.0:
-            return STATUS_EXIT, "EXIT (score)", f"score {current_score:.2f} in severe FLAG band 45-52"
+        if current_score < _SEVERE_FLAG_THRESHOLD:
+            return (
+                STATUS_EXIT,
+                "EXIT (score)",
+                f"score {current_score:.2f} in severe FLAG band 45-{_SEVERE_FLAG_THRESHOLD:.0f}",
+            )
         if new_count >= 2:
             return STATUS_EXIT, "EXIT (score)", f"FLAG persistence {new_count}/2 days"
         return STATUS_FLAG, f"FLAG ({new_count}/2 days)", f"score {current_score:.2f} in FLAG band 45-60"

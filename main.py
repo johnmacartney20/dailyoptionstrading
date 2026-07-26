@@ -1844,6 +1844,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             allocate_rrsp_portfolio,
             rrsp_histories,
             rrsp_available_cash,
+            # RRSP remains broader than TFSA/FHSA: one extra slot, but lower max weight
+            # to maintain stability while the tightened review policy consolidates weak names.
             4,
             0.45,
             rrsp_existing,
