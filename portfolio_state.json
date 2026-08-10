@@ -1028,12 +1028,12 @@
       "ticker": "VFV"
     }
   ],
-  "generated_at": "2026-08-07T14:37:18Z",
+  "generated_at": "2026-08-10T14:42:43Z",
   "positions": [
     {
       "account_type": "FHSA",
       "entry_composite_score": 100.0,
-      "entry_date": "2026-08-07",
+      "entry_date": "2026-08-10",
       "entry_price": 1.0,
       "entry_thesis_tags": [
         "cash",
@@ -1044,10 +1044,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 1081.22,
+        "cash_amount": 35175.66,
         "is_cash": true
       },
-      "quantity": 1081,
+      "quantity": 35176,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -1055,9 +1055,9 @@
     },
     {
       "account_type": "FHSA",
-      "entry_composite_score": 78.69,
-      "entry_date": "2026-08-07",
-      "entry_price": 276.17,
+      "entry_composite_score": 83.77,
+      "entry_date": "2026-08-10",
+      "entry_price": 412.17,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1067,56 +1067,16 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 41,
+      "quantity": 2,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
-      "ticker": "AMZN"
-    },
-    {
-      "account_type": "FHSA",
-      "entry_composite_score": 79.24,
-      "entry_date": "2026-08-07",
-      "entry_price": 74.41,
-      "entry_thesis_tags": [
-        "above 20MA",
-        "above 50MA",
-        "outperforming market"
-      ],
-      "last_review_date": null,
-      "last_review_reason": "",
-      "last_review_score": null,
-      "metadata": {},
-      "quantity": 186,
-      "review_history": [],
-      "status": "HOLD",
-      "sub_portfolio": "growth",
-      "ticker": "BAM.TO"
-    },
-    {
-      "account_type": "FHSA",
-      "entry_composite_score": 76.61,
-      "entry_date": "2026-08-07",
-      "entry_price": 59.85,
-      "entry_thesis_tags": [
-        "above 20MA",
-        "above 50MA",
-        "outperforming market"
-      ],
-      "last_review_date": null,
-      "last_review_reason": "",
-      "last_review_score": null,
-      "metadata": {},
-      "quantity": 163,
-      "review_history": [],
-      "status": "HOLD",
-      "sub_portfolio": "growth",
-      "ticker": "PYPL"
+      "ticker": "AMGN"
     },
     {
       "account_type": "OPTIONS",
       "entry_composite_score": 100.0,
-      "entry_date": "2026-08-07",
+      "entry_date": "2026-08-10",
       "entry_price": 1.0,
       "entry_thesis_tags": [
         "cash",
@@ -1127,10 +1087,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 12406.56,
+        "cash_amount": 17889.1,
         "is_cash": true
       },
-      "quantity": 12407,
+      "quantity": 17889,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -1138,9 +1098,9 @@
     },
     {
       "account_type": "OPTIONS",
-      "entry_composite_score": 78.68,
-      "entry_date": "2026-08-07",
-      "entry_price": 276.13,
+      "entry_composite_score": 83.77,
+      "entry_date": "2026-08-10",
+      "entry_price": 412.17,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1151,42 +1111,19 @@
       "last_review_score": null,
       "metadata": {
         "asset_type": "equity",
-        "cad_equiv": 3239.59
+        "cad_equiv": 2076.78
       },
-      "quantity": 11,
+      "quantity": 5,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
-      "ticker": "AMZN"
+      "ticker": "AMGN"
     },
     {
       "account_type": "OPTIONS",
-      "entry_composite_score": 79.24,
-      "entry_date": "2026-08-07",
-      "entry_price": 74.41,
-      "entry_thesis_tags": [
-        "above 20MA",
-        "above 50MA",
-        "outperforming market"
-      ],
-      "last_review_date": null,
-      "last_review_reason": "",
-      "last_review_score": null,
-      "metadata": {
-        "asset_type": "equity",
-        "cad_equiv": 4555.67
-      },
-      "quantity": 61,
-      "review_history": [],
-      "status": "HOLD",
-      "sub_portfolio": "growth",
-      "ticker": "BAM.TO"
-    },
-    {
-      "account_type": "OPTIONS",
-      "entry_composite_score": 89.20871334270284,
-      "entry_date": "2026-08-07",
-      "entry_price": 3.4,
+      "entry_composite_score": 90.96150081034443,
+      "entry_date": "2026-08-10",
+      "entry_price": 7.15,
       "entry_thesis_tags": [
         "risk-adjusted return",
         "otm quality",
@@ -1196,23 +1133,23 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cad_equiv": 3897.63,
-        "capital_at_risk": 3300.0,
-        "expiry": "2026-09-18",
-        "long_strike": 270.0,
+        "cad_equiv": 2076.78,
+        "capital_at_risk": 1995.0,
+        "expiry": "2026-08-21",
+        "long_strike": 740.0,
         "option_type": "put",
-        "strike": 280.0
+        "strike": 750.0
       },
-      "quantity": 5,
+      "quantity": 7,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "put-spread",
-      "ticker": "TSLA"
+      "ticker": "MU"
     },
     {
       "account_type": "RRSP",
       "entry_composite_score": 100.0,
-      "entry_date": "2026-08-07",
+      "entry_date": "2026-08-10",
       "entry_price": 1.0,
       "entry_thesis_tags": [
         "cash",
@@ -1223,10 +1160,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 6657.3,
+        "cash_amount": 18791.4,
         "is_cash": true
       },
-      "quantity": 6657,
+      "quantity": 18791,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -1234,126 +1171,66 @@
     },
     {
       "account_type": "RRSP",
-      "entry_composite_score": 77.24,
-      "entry_date": "2026-08-07",
-      "entry_price": 31.93,
+      "entry_composite_score": 75.81,
+      "entry_date": "2026-08-10",
+      "entry_price": 412.17,
       "entry_thesis_tags": [
         "above 50-day MA (strong trend)",
-        "moderate volatility (26%)",
+        "moderate volatility (31%)",
         "highly liquid large-cap"
       ],
       "last_review_date": null,
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 276,
+      "quantity": 7,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "stability",
-      "ticker": "BCE.TO"
-    },
-    {
-      "account_type": "RRSP",
-      "entry_composite_score": 71.03,
-      "entry_date": "2026-08-07",
-      "entry_price": 947.78,
-      "entry_thesis_tags": [
-        "above 20-day MA",
-        "low volatility (18%)",
-        "highly liquid large-cap"
-      ],
-      "last_review_date": null,
-      "last_review_reason": "",
-      "last_review_score": null,
-      "metadata": {},
-      "quantity": 9,
-      "review_history": [],
-      "status": "HOLD",
-      "sub_portfolio": "stability",
-      "ticker": "COST"
-    },
-    {
-      "account_type": "TFSA",
-      "entry_composite_score": 100.0,
-      "entry_date": "2026-08-07",
-      "entry_price": 1.0,
-      "entry_thesis_tags": [
-        "cash",
-        "reserve",
-        "liquidity"
-      ],
-      "last_review_date": null,
-      "last_review_reason": "",
-      "last_review_score": null,
-      "metadata": {
-        "cash_amount": 85.79,
-        "is_cash": true
-      },
-      "quantity": 86,
-      "review_history": [],
-      "status": "HOLD",
-      "sub_portfolio": "cash-reserve",
-      "ticker": "CASH.CAD"
-    },
-    {
-      "account_type": "TFSA",
-      "entry_composite_score": 82.48,
-      "entry_date": "2026-08-07",
-      "entry_price": 406.15,
-      "entry_thesis_tags": [
-        "above 20MA",
-        "above 50MA",
-        "outperforming market"
-      ],
-      "last_review_date": null,
-      "last_review_reason": "",
-      "last_review_score": null,
-      "metadata": {},
-      "quantity": 72,
-      "review_history": [],
-      "status": "HOLD",
-      "sub_portfolio": "growth",
       "ticker": "AMGN"
     },
     {
-      "account_type": "TFSA",
-      "entry_composite_score": 78.68,
-      "entry_date": "2026-08-07",
-      "entry_price": 276.13,
+      "account_type": "RRSP",
+      "entry_composite_score": 90.9,
+      "entry_date": "2026-08-10",
+      "entry_price": 774.47,
       "entry_thesis_tags": [
-        "above 20MA",
-        "above 50MA",
-        "outperforming market"
+        "above 50-day MA (strong trend)",
+        "low volatility (14%)",
+        "highly liquid large-cap"
       ],
       "last_review_date": null,
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 54,
+      "quantity": 3,
       "review_history": [],
       "status": "HOLD",
-      "sub_portfolio": "growth",
-      "ticker": "AMZN"
+      "sub_portfolio": "stability",
+      "ticker": "SPY"
     },
     {
       "account_type": "TFSA",
-      "entry_composite_score": 79.24,
-      "entry_date": "2026-08-07",
-      "entry_price": 74.41,
+      "entry_composite_score": 100.0,
+      "entry_date": "2026-08-10",
+      "entry_price": 1.0,
       "entry_thesis_tags": [
-        "above 20MA",
-        "above 50MA",
-        "outperforming market"
+        "cash",
+        "reserve",
+        "liquidity"
       ],
       "last_review_date": null,
       "last_review_reason": "",
       "last_review_score": null,
-      "metadata": {},
-      "quantity": 279,
+      "metadata": {
+        "cash_amount": 65000.0,
+        "is_cash": true
+      },
+      "quantity": 65000,
       "review_history": [],
       "status": "HOLD",
-      "sub_portfolio": "growth",
-      "ticker": "BAM.TO"
+      "sub_portfolio": "cash-reserve",
+      "ticker": "CASH.CAD"
     }
   ],
   "version": 1
