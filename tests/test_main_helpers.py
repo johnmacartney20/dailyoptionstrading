@@ -214,7 +214,7 @@ def test_always_on_sizing_mixed_affordability():
             "strike": 150.0,
             "stock_price": 155.0,
             "score": 90.0,
-            "max_spread_loss": 400.0,   # affordable: 2500 / 400 = 6 contracts
+            "max_spread_loss": 400.0,   # affordable: floor(2500 / 400) = 6 contracts
         },
         {
             "ticker": "TSLA",
