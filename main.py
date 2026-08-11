@@ -1760,31 +1760,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     options_suggestions = _apply_lockout_to_suggestions(suggestions, options_lockout_families)
     tfsa_option_suggestions = _apply_lockout_to_suggestions(suggestions, tfsa_lockout_families)
 
-    # ── Optional risk controls / sizing ─────────────────────────────────────
-    use_risk_controls = any(
-        v is not None
-        for v in (
-            args.account_cash,
-            args.max_notional_per_trade,
-            args.max_total_notional,
-            args.max_trades_per_ticker,
-        )
-    )
-
-    if use_risk_controls:
-        suggestions = add_position_sizing_columns(
-            suggestions,
-            account_cash=args.account_cash,
-            max_notional_per_trade=args.max_notional_per_trade,
-        )
-        suggestions = filter_unaffordable_trades(suggestions)
-        if args.max_total_notional is not None:
-            suggestions = allocate_under_total_notional(
-                suggestions.sort_values("score", ascending=False).reset_index(drop=True),
-                max_total_notional=float(args.max_total_notional),
-                max_trades_per_ticker=args.max_trades_per_ticker,
-            )
-
     entry_bar = float(PORTFOLIO_THRESHOLDS.get("entry_bar", 8.0))
     displacement_margin = float(PORTFOLIO_THRESHOLDS.get("displacement_margin", 1.5))
 
@@ -1831,8 +1806,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     rrsp_flagged = _flagged_score_map(state, "RRSP", "stability")
     fhsa_flagged = _flagged_score_map(state, "FHSA", "growth")
 
-    # ── Options portfolio allocation ───────────────────────────────────────────
-    # OPTIONS account uses a strict 50/50 split between spreads and stock sleeves.
+    # ── Available cash per account (derived from portfolio_state.json) ─────────
+    # These values reflect actual deployable cash: account total minus the book
+    # value of all active HOLD/FLAG positions already in the portfolio.
     options_total_capital = _available_account_cash(
         state,
         "OPTIONS",
@@ -1855,6 +1831,57 @@ def main(argv: Optional[List[str]] = None) -> int:
         "FHSA",
         float(ACCOUNT_CAPITALS.get("FHSA", 36_000.0)),
     )
+
+    # ── Always-on per-contract sizing against actual available cash ────────────
+    # Annotate each suggestion with its notional exposure per contract and cap
+    # max_contracts at what the available cash budget actually supports.  This
+    # prevents the allocator from suggesting positions the account cannot fund,
+    # and it applies in every run – including automated GitHub Actions runs that
+    # do not pass the optional CLI risk-control flags.
+    #
+    # options_suggestions: sized against the spreads sleeve (50 % of OPTIONS cash)
+    # tfsa_option_suggestions: sized against available TFSA cash
+    #
+    # CLI flags (--account-cash, --max-notional-per-trade, --max-total-notional)
+    # are applied afterwards and can only further tighten the constraints.
+    if not options_suggestions.empty:
+        options_suggestions = add_position_sizing_columns(
+            options_suggestions,
+            account_cash=options_spreads_capital,
+        )
+        options_suggestions = filter_unaffordable_trades(options_suggestions)
+
+    if not tfsa_option_suggestions.empty:
+        tfsa_option_suggestions = add_position_sizing_columns(
+            tfsa_option_suggestions,
+            account_cash=tfsa_available_cash,
+        )
+        tfsa_option_suggestions = filter_unaffordable_trades(tfsa_option_suggestions)
+
+    # ── Optional CLI risk controls / sizing (additive) ───────────────────────
+    use_risk_controls = any(
+        v is not None
+        for v in (
+            args.account_cash,
+            args.max_notional_per_trade,
+            args.max_total_notional,
+            args.max_trades_per_ticker,
+        )
+    )
+
+    if use_risk_controls:
+        suggestions = add_position_sizing_columns(
+            suggestions,
+            account_cash=args.account_cash,
+            max_notional_per_trade=args.max_notional_per_trade,
+        )
+        suggestions = filter_unaffordable_trades(suggestions)
+        if args.max_total_notional is not None:
+            suggestions = allocate_under_total_notional(
+                suggestions.sort_values("score", ascending=False).reset_index(drop=True),
+                max_total_notional=float(args.max_total_notional),
+                max_trades_per_ticker=args.max_trades_per_ticker,
+            )
 
     # Both options allocations are independent — run them in parallel.
     with ThreadPoolExecutor(max_workers=2) as executor:
