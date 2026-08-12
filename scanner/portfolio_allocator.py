@@ -10,6 +10,7 @@ import math
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -97,6 +98,9 @@ _MAX_DTE_SPREAD: int = 10
 # Expiries outside this window are excluded before candidate selection.
 _TFSA_LONG_CALL_MIN_DTE: int = 21
 _TFSA_LONG_CALL_MAX_DTE: int = 42
+
+# Minimum days that must elapse after exiting a position before FHSA can re-enter.
+_FHSA_REENTRY_LOCKOUT_DAYS: int = 30
 
 # Groups of tickers considered highly correlated with each other.
 # Only one trade per group is allowed in the portfolio.
@@ -1009,49 +1013,243 @@ def allocate_tfsa_stock_portfolio(
 def allocate_fhsa_stock_portfolio(
     price_histories: Dict[str, Optional[pd.DataFrame]],
     total_capital: float = 1000.0,
-    max_positions: int = 4,
-    max_position_pct: float = 0.475,
+    max_positions: int = 3,
+    max_position_pct: float = 0.50,
     max_sector_pct: float = 0.50,
     market_return_20d: float = 0.0,
     existing_holdings: Optional[List[str]] = None,
     flagged_holdings_scores: Optional[Dict[str, float]] = None,
     entry_score_min: float = 0.0,
     displacement_margin: float = 0.0,
+    exited_holdings: Optional[Dict[str, date]] = None,
+    reentry_lockout_days: int = _FHSA_REENTRY_LOCKOUT_DAYS,
 ) -> TfsaStockPortfolio:
-    """Select FHSA growth holdings with blended TFSA/RRSP sizing behavior."""
-    result = allocate_tfsa_stock_portfolio(
-        price_histories=price_histories,
-        total_capital=total_capital,
-        max_positions=max_positions,
-        max_position_pct=max_position_pct,
-        max_sector_pct=max_sector_pct,
-        market_return_20d=market_return_20d,
-        existing_holdings=existing_holdings,
-        flagged_holdings_scores=flagged_holdings_scores,
-        entry_score_min=entry_score_min,
-        displacement_margin=displacement_margin,
-    )
-    if not result.selected:
+    """Select FHSA growth holdings with a genuine 40/60 TFSA/RRSP blend.
+
+    FHSA has a shorter effective horizon than TFSA (funds will be withdrawn
+    for a home purchase), so it tilts 60 % toward RRSP-style stability.
+
+    Scoring:
+        composite = 0.40 × score_stock_growth + 0.60 × score_stock_stability
+
+    Position sizing:
+        allocation = 0.40 × tfsa_concentrated_allocation
+                   + 0.60 × score_weighted_allocation
+
+    Re-entry lockout:
+        A ticker whose exit date appears in *exited_holdings* is blocked for
+        *reentry_lockout_days* calendar days (default 30).
+
+    All other selection constraints (sector diversity, correlation exclusion,
+    displacement logic) are identical to the TFSA and RRSP functions.
+    """
+    result = TfsaStockPortfolio(total_capital=total_capital)
+    if float(total_capital) <= 0:
+        return result
+    if not price_histories:
         return result
 
-    scores = [max(float(p.composite_score), 0.0) for p in result.selected]
-    tfsa_allocs = _tfsa_concentrated_allocation(
-        len(result.selected),
-        total_capital,
-        max_single_pct=max_position_pct,
-    )
-    rrsp_allocs = _score_weighted_allocation(scores, total_capital, max_position_pct)
-    blended = [(a + b) / 2.0 for a, b in zip(tfsa_allocs, rrsp_allocs)]
+    today = date.today()
+    exited: Dict[str, date] = {k.upper(): v for k, v in (exited_holdings or {}).items()}
 
-    total_blended = sum(blended)
+    # Score all candidates with 40/60 blended composite
+    candidates: List[tuple] = []
+    for ticker, hist in price_histories.items():
+        if hist is None or hist.empty:
+            continue
+        price = float(hist["Close"].iloc[-1])
+        if not _is_positive_finite(price):
+            logger.warning(
+                "Skipping %s for FHSA allocation due to invalid latest close: %r",
+                ticker, price,
+            )
+            continue
+        score_growth = score_stock_growth(hist, market_return_20d)
+        score_stability = score_stock_stability(hist)
+        blended_composite = (
+            0.40 * float(score_growth.composite)
+            + 0.60 * float(score_stability.composite)
+        )
+        if not math.isfinite(blended_composite):
+            logger.warning(
+                "Skipping %s for FHSA allocation due to non-finite blended score: %r",
+                ticker, blended_composite,
+            )
+            continue
+        if blended_composite <= 0:
+            logger.warning(
+                "Skipping %s for FHSA allocation due to non-positive blended score: %r",
+                ticker, blended_composite,
+            )
+            continue
+        candidates.append((ticker, price, blended_composite, score_growth.reasoning))
+
+    candidates.sort(key=lambda x: x[2], reverse=True)
+
+    # ── Seed deduplication from existing holdings ──────────────────────────
+    held: List[str] = [t.upper() for t in (existing_holdings or [])]
+    held_sectors: List[str] = []
+    for held_ticker in held:
+        s = _get_sector(held_ticker)
+        if s not in held_sectors:
+            held_sectors.append(s)
+
+    selected_tickers: List[str] = list(held)
+    selected_sectors: List[str] = list(held_sectors)
+    selected_items: List[tuple] = []
+    available_slots = max(0, max_positions - len(held))
+    displaceable_flags: Dict[str, float] = {
+        str(t).upper(): float(s)
+        for t, s in (flagged_holdings_scores or {}).items()
+        if str(t).upper() in selected_tickers
+    }
+
+    candidate_pool = candidates[: max(max_positions * 5, 15)]
+
+    for ticker, price, composite, reasoning in candidate_pool:
+        if composite < entry_score_min:
+            result.rejected.append(
+                RejectedCandidate(
+                    ticker,
+                    composite,
+                    f"below entry bar ({composite:.2f} < {entry_score_min:.2f})",
+                )
+            )
+            continue
+
+        # Re-entry lockout check
+        exit_date = exited.get(ticker.upper())
+        if exit_date is not None:
+            days_since_exit = (today - exit_date).days
+            if days_since_exit < reentry_lockout_days:
+                result.rejected.append(
+                    RejectedCandidate(
+                        ticker,
+                        composite,
+                        f"re-entry lockout: {days_since_exit}d < {reentry_lockout_days}d cooldown",
+                    )
+                )
+                continue
+
+        if ticker in held:
+            result.rejected.append(
+                RejectedCandidate(ticker, composite, "already in portfolio")
+            )
+            continue
+
+        if available_slots <= 0:
+            if not displaceable_flags:
+                result.rejected.append(
+                    RejectedCandidate(
+                        ticker,
+                        composite,
+                        f"lower blended score – outside top-{max_positions} selection",
+                    )
+                )
+                continue
+
+            weak_ticker, weak_score = min(displaceable_flags.items(), key=lambda x: x[1])
+            if composite < weak_score + displacement_margin:
+                result.rejected.append(
+                    RejectedCandidate(
+                        ticker,
+                        composite,
+                        (
+                            f"does not displace FLAG {weak_ticker} "
+                            f"({composite:.2f} < {weak_score + displacement_margin:.2f})"
+                        ),
+                    )
+                )
+                continue
+
+            available_slots += 1
+            displaceable_flags.pop(weak_ticker, None)
+            if weak_ticker in selected_tickers:
+                selected_tickers.remove(weak_ticker)
+            weak_sector = _get_sector(weak_ticker)
+            if weak_sector in selected_sectors:
+                selected_sectors.remove(weak_sector)
+            result.rejected.append(
+                RejectedCandidate(
+                    weak_ticker,
+                    weak_score,
+                    f"displaced by {ticker} ({composite:.2f})",
+                )
+            )
+
+        sector = _get_sector(ticker)
+
+        if ticker in selected_tickers:
+            result.rejected.append(
+                RejectedCandidate(ticker, composite, "duplicate ticker")
+            )
+            continue
+
+        correlated_with = next(
+            (t for t in selected_tickers if _are_correlated(ticker, t)), None
+        )
+        if correlated_with:
+            result.rejected.append(
+                RejectedCandidate(
+                    ticker, composite, f"high correlation with {correlated_with}"
+                )
+            )
+            continue
+
+        if sector in selected_sectors:
+            result.rejected.append(
+                RejectedCandidate(ticker, composite, "duplicate sector exposure")
+            )
+            continue
+
+        selected_tickers.append(ticker)
+        selected_sectors.append(sector)
+        selected_items.append((ticker, price, composite, sector, reasoning))
+        available_slots -= 1
+
+    # Candidates beyond the inspected pool are also rejected (lower score)
+    for ticker, price, composite, _ in candidates[len(candidate_pool):]:
+        result.rejected.append(
+            RejectedCandidate(
+                ticker,
+                composite,
+                f"lower blended score – outside top-{max_positions} selection",
+            )
+        )
+
+    if not selected_items:
+        return result
+
+    # ── Capital allocation — 40/60 growth/stability blend ─────────────────
+    scores = [max(item[2], 0.0) for item in selected_items]
+    growth_allocs = _tfsa_concentrated_allocation(
+        len(selected_items), total_capital, max_single_pct=max_position_pct
+    )
+    stability_allocs = _score_weighted_allocation(scores, total_capital, max_position_pct)
+    blended_allocs = [
+        0.40 * g + 0.60 * s
+        for g, s in zip(growth_allocs, stability_allocs)
+    ]
+
+    total_blended = sum(blended_allocs)
     if total_blended > 0:
         scale = float(total_capital) / total_blended
-        blended = [v * scale for v in blended]
+        blended_allocs = [v * scale for v in blended_allocs]
 
-    for idx, pos in enumerate(result.selected):
-        alloc = round(blended[idx], 2) if idx < len(blended) else 0.0
-        pos.allocation = alloc
-        pos.pct_of_portfolio = round((alloc / float(total_capital)) * 100, 1) if total_capital > 0 else 0.0
+    for (ticker, price, composite, sector, reasoning), alloc in zip(selected_items, blended_allocs):
+        alloc = round(alloc, 2)
+        result.selected.append(
+            StockAllocation(
+                ticker=ticker,
+                sector=sector,
+                current_price=round(price, 2),
+                composite_score=round(composite, 2),
+                allocation=alloc,
+                pct_of_portfolio=round(alloc / float(total_capital) * 100, 1) if total_capital > 0 else 0.0,
+                reasoning=reasoning,
+            )
+        )
+
     return result
 
 
