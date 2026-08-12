@@ -553,20 +553,6 @@ def _entry_bar_candidates_to_html(
     else:
         html += "<p>No candidates cleared the entry bar.</p>"
 
-    if rejected_candidates:
-        rej_df = pd.DataFrame(rejected_candidates)
-        keep_cols = [c for c in ["ticker", "score", "reason"] if c in rej_df.columns]
-        if keep_cols:
-            html += "<h3>Passed / Deferred (with reason)</h3>"
-            sub = rej_df[keep_cols].head(top * 2).copy()
-            sub.columns = ["Ticker", "Score", "Reason"]
-            headers = "".join(f"<th>{h}</th>" for h in sub.columns)
-            rows = ""
-            for _, row in sub.iterrows():
-                cells = "".join(f"<td>{v}</td>" for v in row)
-                rows += f"<tr>{cells}</tr>"
-            html += f"<table><thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table>"
-
     html += "</div>"
     return html
 
@@ -1272,13 +1258,6 @@ def build_html_email(
             + _combined_allocation_table_html(allocation_rows)
         ),
     )
-
-    grouped_rejections = _grouped_rejected_candidates_html(rejected_candidates)
-    if grouped_rejections:
-        html += _visible_section(
-            "Passed / Deferred Candidates",
-            grouped_rejections,
-        )
 
     if suggestions is not None and not suggestions.empty and "option_type" in suggestions.columns:
         ranked = suggestions.sort_values("score", ascending=False) if "score" in suggestions.columns else suggestions

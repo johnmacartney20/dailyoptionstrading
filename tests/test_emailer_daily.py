@@ -110,8 +110,7 @@ def test_daily_email_prioritizes_actions_and_groups_rejections():
     assert "NVDA" in html and "EXIT" in html
     assert "New trades entered: <strong>4</strong>" in html
     assert "Model Holdings Snapshot" not in html
-    assert "NVDA" in html and "2" in html and "duplicate ticker" in html
-    assert "no available slots" in html
+    assert "NVDA" in html and "2" in html
     assert "Portfolio Actions" in html
     assert "Top Options Watchlist" in html
     assert "<details><summary><strong>Top Options Watchlist</strong></summary>" in html
