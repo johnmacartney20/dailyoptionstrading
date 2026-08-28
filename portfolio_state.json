@@ -1118,12 +1118,12 @@
       "ticker": "VFV"
     }
   ],
-  "generated_at": "2026-08-27T17:23:12Z",
+  "generated_at": "2026-08-28T17:38:21Z",
   "positions": [
     {
       "account_type": "FHSA",
       "entry_composite_score": 100.0,
-      "entry_date": "2026-08-27",
+      "entry_date": "2026-08-28",
       "entry_price": 1.0,
       "entry_thesis_tags": [
         "cash",
@@ -1134,10 +1134,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 20665.47,
+        "cash_amount": 15618.64,
         "is_cash": true
       },
-      "quantity": 20665,
+      "quantity": 15619,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -1145,9 +1145,9 @@
     },
     {
       "account_type": "FHSA",
-      "entry_composite_score": 82.51,
-      "entry_date": "2026-08-27",
-      "entry_price": 148.29,
+      "entry_composite_score": 80.39,
+      "entry_date": "2026-08-28",
+      "entry_price": 81.46,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1157,36 +1157,36 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 49,
+      "quantity": 118,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
-      "ticker": "GILD"
+      "ticker": "NFLX"
     },
     {
       "account_type": "FHSA",
-      "entry_composite_score": 83.88,
-      "entry_date": "2026-08-27",
-      "entry_price": 504.27,
+      "entry_composite_score": 82.56,
+      "entry_date": "2026-08-28",
+      "entry_price": 769.22,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
-        "outperforming market"
+        "lagging market"
       ],
       "last_review_date": null,
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 16,
+      "quantity": 14,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
-      "ticker": "MSFT"
+      "ticker": "SPY"
     },
     {
       "account_type": "OPTIONS",
       "entry_composite_score": 100.0,
-      "entry_date": "2026-08-27",
+      "entry_date": "2026-08-28",
       "entry_price": 1.0,
       "entry_thesis_tags": [
         "cash",
@@ -1197,10 +1197,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 18476.78,
+        "cash_amount": 12398.0,
         "is_cash": true
       },
-      "quantity": 18477,
+      "quantity": 12398,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -1208,9 +1208,9 @@
     },
     {
       "account_type": "OPTIONS",
-      "entry_composite_score": 86.35,
-      "entry_date": "2026-08-27",
-      "entry_price": 504.29,
+      "entry_composite_score": 87.19,
+      "entry_date": "2026-08-28",
+      "entry_price": 431.93,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
@@ -1221,19 +1221,42 @@
       "last_review_score": null,
       "metadata": {
         "asset_type": "equity",
-        "cad_equiv": 2016.75
+        "cad_equiv": 4665.54
       },
-      "quantity": 3,
+      "quantity": 10,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
-      "ticker": "MSFT"
+      "ticker": "AMGN"
     },
     {
       "account_type": "OPTIONS",
-      "entry_composite_score": 88.64978459110812,
-      "entry_date": "2026-08-27",
-      "entry_price": 3.45,
+      "entry_composite_score": 83.01,
+      "entry_date": "2026-08-28",
+      "entry_price": 81.46,
+      "entry_thesis_tags": [
+        "above 20MA",
+        "above 50MA",
+        "outperforming market"
+      ],
+      "last_review_date": null,
+      "last_review_reason": "",
+      "last_review_score": null,
+      "metadata": {
+        "asset_type": "equity",
+        "cad_equiv": 3317.71
+      },
+      "quantity": 40,
+      "review_history": [],
+      "status": "HOLD",
+      "sub_portfolio": "growth",
+      "ticker": "NFLX"
+    },
+    {
+      "account_type": "OPTIONS",
+      "entry_composite_score": 88.96618696375089,
+      "entry_date": "2026-08-28",
+      "entry_price": 4.05,
       "entry_thesis_tags": [
         "risk-adjusted return",
         "otm quality",
@@ -1243,23 +1266,23 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cad_equiv": 2016.75,
-        "capital_at_risk": 1965.0,
-        "expiry": "2026-09-18",
-        "long_strike": 400.0,
+        "cad_equiv": 3991.62,
+        "capital_at_risk": 3570.0,
+        "expiry": "2026-10-16",
+        "long_strike": 290.0,
         "option_type": "put",
-        "strike": 410.0
+        "strike": 300.0
       },
-      "quantity": 3,
+      "quantity": 6,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "put-spread",
-      "ticker": "AMD"
+      "ticker": "TSLA"
     },
     {
       "account_type": "RRSP",
       "entry_composite_score": 100.0,
-      "entry_date": "2026-08-27",
+      "entry_date": "2026-08-28",
       "entry_price": 1.0,
       "entry_thesis_tags": [
         "cash",
@@ -1270,10 +1293,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 22723.61,
+        "cash_amount": 3860.61,
         "is_cash": true
       },
-      "quantity": 22724,
+      "quantity": 3861,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -1281,9 +1304,9 @@
     },
     {
       "account_type": "RRSP",
-      "entry_composite_score": 82.24,
-      "entry_date": "2026-08-27",
-      "entry_price": 504.29,
+      "entry_composite_score": 77.67,
+      "entry_date": "2026-08-28",
+      "entry_price": 431.93,
       "entry_thesis_tags": [
         "above 50-day MA (strong trend)",
         "moderate volatility (28%)",
@@ -1293,36 +1316,36 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 1,
+      "quantity": 23,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "stability",
-      "ticker": "MSFT"
+      "ticker": "AMGN"
     },
     {
       "account_type": "RRSP",
-      "entry_composite_score": 94.1,
-      "entry_date": "2026-08-27",
-      "entry_price": 772.1,
+      "entry_composite_score": 84.31,
+      "entry_date": "2026-08-28",
+      "entry_price": 32.5,
       "entry_thesis_tags": [
         "above 50-day MA (strong trend)",
-        "low volatility (11%)",
+        "low volatility (20%)",
         "highly liquid large-cap"
       ],
       "last_review_date": null,
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {},
-      "quantity": 1,
+      "quantity": 314,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "stability",
-      "ticker": "SPY"
+      "ticker": "BCE.TO"
     },
     {
       "account_type": "TFSA",
       "entry_composite_score": 100.0,
-      "entry_date": "2026-08-27",
+      "entry_date": "2026-08-28",
       "entry_price": 1.0,
       "entry_thesis_tags": [
         "cash",
@@ -1333,14 +1356,74 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 65000.0,
+        "cash_amount": 401.46,
         "is_cash": true
       },
-      "quantity": 65000,
+      "quantity": 401,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
       "ticker": "CASH.CAD"
+    },
+    {
+      "account_type": "TFSA",
+      "entry_composite_score": 87.19,
+      "entry_date": "2026-08-28",
+      "entry_price": 431.93,
+      "entry_thesis_tags": [
+        "above 20MA",
+        "above 50MA",
+        "outperforming market"
+      ],
+      "last_review_date": null,
+      "last_review_reason": "",
+      "last_review_score": null,
+      "metadata": {},
+      "quantity": 48,
+      "review_history": [],
+      "status": "HOLD",
+      "sub_portfolio": "growth",
+      "ticker": "AMGN"
+    },
+    {
+      "account_type": "TFSA",
+      "entry_composite_score": 87.94,
+      "entry_date": "2026-08-28",
+      "entry_price": 517.12,
+      "entry_thesis_tags": [
+        "above 20MA",
+        "above 50MA",
+        "outperforming market"
+      ],
+      "last_review_date": null,
+      "last_review_reason": "",
+      "last_review_score": null,
+      "metadata": {},
+      "quantity": 56,
+      "review_history": [],
+      "status": "HOLD",
+      "sub_portfolio": "growth",
+      "ticker": "MSFT"
+    },
+    {
+      "account_type": "TFSA",
+      "entry_composite_score": 83.01,
+      "entry_date": "2026-08-28",
+      "entry_price": 81.46,
+      "entry_thesis_tags": [
+        "above 20MA",
+        "above 50MA",
+        "outperforming market"
+      ],
+      "last_review_date": null,
+      "last_review_reason": "",
+      "last_review_score": null,
+      "metadata": {},
+      "quantity": 183,
+      "review_history": [],
+      "status": "HOLD",
+      "sub_portfolio": "growth",
+      "ticker": "NFLX"
     }
   ],
   "version": 1
