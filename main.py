@@ -105,7 +105,7 @@ from scanner.risk import (
     allocate_under_total_notional,
     filter_unaffordable_trades,
 )
-from scanner.suggester import ZERO_BID_CHAIN_THRESHOLD, generate_suggestions, screen_options
+from scanner.suggester import ZERO_BID_CHAIN_THRESHOLD, generate_suggestions, get_zero_bid_ratio, screen_options
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -712,11 +712,7 @@ def scan_ticker(ticker: str) -> Tuple[List[pd.DataFrame], Dict[str, int]]:
 
         for opt_type, opt_df in (("call", calls_df), ("put", puts_df)):
             diagnostics["chains_checked"] += 1
-            zero_bid_ratio = (
-                opt_df["bid"].fillna(0).eq(0).sum() / max(len(opt_df), 1)
-                if opt_df is not None and not opt_df.empty and "bid" in opt_df.columns
-                else 0.0
-            )
+            zero_bid_ratio = get_zero_bid_ratio(opt_df)
             if zero_bid_ratio > ZERO_BID_CHAIN_THRESHOLD:
                 diagnostics["stale_chains"] += 1
             screened = screen_options(
