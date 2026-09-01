@@ -675,8 +675,11 @@ def _sync_account_cash_reserves(
 def scan_ticker(ticker: str) -> Tuple[List[pd.DataFrame], Dict[str, int]]:
     """Fetch and screen all qualifying options for *ticker*.
 
-    Returns a (possibly empty) list of screened DataFrames, one per
-    expiry / option-type combination that produced at least one candidate.
+    Returns a tuple of:
+    1. A (possibly empty) list of screened DataFrames, one per expiry /
+       option-type combination that produced at least one candidate.
+    2. A diagnostics dict with ``eligible_expiries``, ``chains_checked``,
+       and ``stale_chains`` counters for the scan.
     """
     results: List[pd.DataFrame] = []
     diagnostics = {"eligible_expiries": 0, "chains_checked": 0, "stale_chains": 0}
