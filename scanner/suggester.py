@@ -15,6 +15,8 @@ from .config import SCREENING_PARAMS
 
 logger = logging.getLogger(__name__)
 
+ZERO_BID_CHAIN_THRESHOLD = 0.80
+
 # Columns to include in the final suggestions output (in display order).
 OUTPUT_COLUMNS = [
     "ticker",
@@ -100,7 +102,7 @@ def screen_options(
     zero_bid_ratio = (
         options_df["bid"].fillna(0).eq(0).sum() / max(len(options_df), 1)
     )
-    if zero_bid_ratio > 0.80:
+    if zero_bid_ratio > ZERO_BID_CHAIN_THRESHOLD:
         logger.warning(
             "Skipping %s %s %s — %.0f%% of bids are zero (stale/bad chain).",
             ticker, option_type, expiry, zero_bid_ratio * 100,

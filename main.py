@@ -40,7 +40,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -56,6 +56,7 @@ from scanner.config import (
     TFSA_CURRENT_HOLDINGS,
     TSX_TICKERS,
 )
+from scanner.analyzer import calculate_dte
 from scanner.data_fetcher import (
     get_earnings_date,
     get_expiration_dates,
@@ -104,7 +105,7 @@ from scanner.risk import (
     allocate_under_total_notional,
     filter_unaffordable_trades,
 )
-from scanner.suggester import generate_suggestions, screen_options
+from scanner.suggester import ZERO_BID_CHAIN_THRESHOLD, generate_suggestions, screen_options
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -665,13 +666,14 @@ def _sync_account_cash_reserves(
             },
         )
 
-def scan_ticker(ticker: str) -> List[pd.DataFrame]:
+def scan_ticker(ticker: str) -> tuple[List[pd.DataFrame], Dict[str, int]]:
     """Fetch and screen all qualifying options for *ticker*.
 
     Returns a (possibly empty) list of screened DataFrames, one per
     expiry / option-type combination that produced at least one candidate.
     """
     results: List[pd.DataFrame] = []
+    diagnostics = {"eligible_expiries": 0, "chains_checked": 0, "stale_chains": 0}
 
     price = get_stock_price(ticker)
     if price is None:
@@ -681,7 +683,18 @@ def scan_ticker(ticker: str) -> List[pd.DataFrame]:
     expiries = get_expiration_dates(ticker)
     if not expiries:
         logger.debug("Skipping %s – no options listed.", ticker)
-        return results
+        return results, diagnostics
+
+    min_dte = int(SCREENING_PARAMS["min_dte"])
+    max_dte = int(SCREENING_PARAMS["max_dte"])
+    expiries = [expiry for expiry in expiries if min_dte <= calculate_dte(expiry) <= max_dte]
+    diagnostics["eligible_expiries"] = len(expiries)
+    if not expiries:
+        logger.debug(
+            "Skipping %s – no expiries inside the %d-%d DTE window.",
+            ticker, min_dte, max_dte,
+        )
+        return results, diagnostics
 
     # Fetch per-ticker signals once and pass through to every expiry/type.
     earnings_date = get_earnings_date(ticker)
@@ -698,6 +711,14 @@ def scan_ticker(ticker: str) -> List[pd.DataFrame]:
         calls_df, puts_df = chain
 
         for opt_type, opt_df in (("call", calls_df), ("put", puts_df)):
+            diagnostics["chains_checked"] += 1
+            zero_bid_ratio = (
+                opt_df["bid"].fillna(0).eq(0).sum() / max(len(opt_df), 1)
+                if opt_df is not None and not opt_df.empty and "bid" in opt_df.columns
+                else 0.0
+            )
+            if zero_bid_ratio > ZERO_BID_CHAIN_THRESHOLD:
+                diagnostics["stale_chains"] += 1
             screened = screen_options(
                 opt_df, price, opt_type, expiry, ticker,
                 premarket_gap=premarket_gap,
@@ -706,7 +727,7 @@ def scan_ticker(ticker: str) -> List[pd.DataFrame]:
             if not screened.empty:
                 results.append(screened)
 
-    return results
+    return results, diagnostics
 
 
 def _print_portfolio_allocation(portfolio: PortfolioAllocation) -> None:
@@ -1713,16 +1734,37 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # ── Scan ──────────────────────────────────────────────────────────────────
     all_frames: List[pd.DataFrame] = []
+    scan_diagnostics: Dict[str, Any] = {
+        "tickers_scanned": len(tickers),
+        "eligible_expiries": 0,
+        "chains_checked": 0,
+        "stale_chains": 0,
+    }
     for idx, ticker in enumerate(tickers, 1):
         logger.info("[%d/%d] %s", idx, len(tickers), ticker)
-        frames = scan_ticker(ticker)
+        frames, ticker_diagnostics = scan_ticker(ticker)
         all_frames.extend(frames)
+        for key in ("eligible_expiries", "chains_checked", "stale_chains"):
+            scan_diagnostics[key] += int(ticker_diagnostics.get(key, 0))
         time.sleep(_TICKER_DELAY)
 
     suggestions = generate_suggestions(all_frames)
+    scan_diagnostics["stale_chain_ratio"] = (
+        scan_diagnostics["stale_chains"] / scan_diagnostics["chains_checked"]
+        if scan_diagnostics["chains_checked"] > 0
+        else 0.0
+    )
 
     if suggestions.empty:
-        logger.warning("No qualifying options found with the current parameters.")
+        if scan_diagnostics["stale_chain_ratio"] >= 0.50:
+            logger.warning(
+                "No qualifying options found; options data looked degraded "
+                "(%d/%d eligible chains had mostly zero bids).",
+                scan_diagnostics["stale_chains"],
+                scan_diagnostics["chains_checked"],
+            )
+        else:
+            logger.warning("No qualifying options found with the current parameters.")
 
     raw_suggestions = suggestions.copy()
 
@@ -2042,6 +2084,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             portfolio_state_summary=state_summary,
             rejected_candidates=rejected_candidates,
             entered_trades_count=entered_trades_count,
+            scan_diagnostics=scan_diagnostics,
         )
         try:
             send_email(
