@@ -256,6 +256,7 @@ def test_always_on_sizing_with_zero_available_cash():
 
 
 def test_scan_ticker_only_fetches_expiries_in_dte_window(monkeypatch):
+    monkeypatch.setattr("main.SCREENING_PARAMS", {"min_dte": 7, "max_dte": 60})
     monkeypatch.setattr("main.get_stock_price", lambda ticker: 100.0)
     monkeypatch.setattr(
         "main.get_expiration_dates",
@@ -285,6 +286,7 @@ def test_scan_ticker_only_fetches_expiries_in_dte_window(monkeypatch):
 
 
 def test_scan_ticker_counts_stale_option_chains(monkeypatch):
+    monkeypatch.setattr("main.SCREENING_PARAMS", {"min_dte": 7, "max_dte": 60})
     monkeypatch.setattr("main.get_stock_price", lambda ticker: 100.0)
     monkeypatch.setattr("main.get_expiration_dates", lambda ticker: [_expiry(30)])
     monkeypatch.setattr("main.get_earnings_date", lambda ticker: None)
