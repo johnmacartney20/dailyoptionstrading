@@ -215,6 +215,18 @@ def test_screen_options_allows_mostly_valid_bids():
     assert not result.empty
 
 
+def test_screen_options_allows_zero_bid_boundary_chain():
+    """A chain with exactly 80 % zero bids should not trigger the stale-data gate."""
+    zero_row = {"bid": 0.0, "openInterest": 1000}
+    valid_row = {"bid": 1.5, "openInterest": 1000}
+    rows = [zero_row] * 8 + [valid_row] * 2
+    df = _make_options_df(*rows)
+    result = screen_options(
+        df, stock_price=100.0, option_type="put", expiry=_expiry(30), ticker="AAPL"
+    )
+    assert not result.empty
+
+
 # ── Earnings filter ───────────────────────────────────────────────────────────
 
 
@@ -264,4 +276,3 @@ def test_screen_options_new_columns_present():
     assert not result.empty
     assert "premarket_gap_pct" in result.columns
     assert "earnings_within_expiry" in result.columns
-

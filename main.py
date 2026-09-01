@@ -731,6 +731,7 @@ def scan_ticker(ticker: str) -> Tuple[List[pd.DataFrame], Dict[str, int]]:
                 opt_df, price, opt_type, expiry, ticker,
                 premarket_gap=premarket_gap,
                 earnings_date=earnings_date,
+                skip_stale_check=True,
             )
             if not screened.empty:
                 results.append(screened)

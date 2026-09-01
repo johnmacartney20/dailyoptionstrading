@@ -82,6 +82,7 @@ def screen_options(
     ticker: str,
     premarket_gap: Optional[float] = None,
     earnings_date: Optional[date] = None,
+    skip_stale_check: bool = False,
 ) -> pd.DataFrame:
     """Enrich and filter *options_df* returning only qualifying candidates.
 
@@ -124,10 +125,11 @@ def screen_options(
     # When >80 % of bids in a chain are zero the feed is almost certainly
     # stale or malformed.  Returning early avoids polluting the run with
     # phantom candidates that survive subsequent filters on a single row.
-    zero_bid_ratio = get_zero_bid_ratio(options_df)
-    if zero_bid_ratio > ZERO_BID_CHAIN_THRESHOLD:
-        log_stale_chain_warning(ticker, option_type, expiry, zero_bid_ratio)
-        return pd.DataFrame()
+    if not skip_stale_check:
+        zero_bid_ratio = get_zero_bid_ratio(options_df)
+        if zero_bid_ratio > ZERO_BID_CHAIN_THRESHOLD:
+            log_stale_chain_warning(ticker, option_type, expiry, zero_bid_ratio)
+            return pd.DataFrame()
 
     # ── Pre-market gap direction filter ──────────────────────────────────────
     # A large downside gap (stock opened ≥ 3 % lower) signals negative near-
