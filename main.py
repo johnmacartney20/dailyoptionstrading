@@ -687,7 +687,7 @@ def scan_ticker(ticker: str) -> Tuple[List[pd.DataFrame], Dict[str, int]]:
     price = get_stock_price(ticker)
     if price is None:
         logger.debug("Skipping %s – no price data.", ticker)
-        return results
+        return results, diagnostics
 
     expiries = get_expiration_dates(ticker)
     if not expiries:

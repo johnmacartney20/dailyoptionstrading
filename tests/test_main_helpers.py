@@ -308,3 +308,12 @@ def test_scan_ticker_counts_stale_option_chains(monkeypatch):
 
     assert frames == []
     assert diagnostics == {"eligible_expiries": 1, "chains_checked": 2, "stale_chains": 2}
+
+
+def test_scan_ticker_returns_empty_diagnostics_when_price_missing(monkeypatch):
+    monkeypatch.setattr("main.get_stock_price", lambda ticker: None)
+
+    frames, diagnostics = scan_ticker("AAPL")
+
+    assert frames == []
+    assert diagnostics == {"eligible_expiries": 0, "chains_checked": 0, "stale_chains": 0}
