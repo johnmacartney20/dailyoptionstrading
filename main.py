@@ -106,9 +106,9 @@ from scanner.risk import (
     filter_unaffordable_trades,
 )
 from scanner.suggester import (
+    ZERO_BID_CHAIN_THRESHOLD,
     generate_suggestions,
     get_zero_bid_ratio,
-    is_stale_chain,
     log_stale_chain_warning,
     screen_options,
 )
@@ -721,13 +721,14 @@ def scan_ticker(ticker: str) -> Tuple[List[pd.DataFrame], Dict[str, int]]:
 
         for opt_type, opt_df in (("call", calls_df), ("put", puts_df)):
             diagnostics["chains_checked"] += 1
-            if is_stale_chain(opt_df):
+            zero_bid_ratio = get_zero_bid_ratio(opt_df)
+            if zero_bid_ratio > ZERO_BID_CHAIN_THRESHOLD:
                 diagnostics["stale_chains"] += 1
                 log_stale_chain_warning(
                     ticker,
                     opt_type,
                     expiry,
-                    get_zero_bid_ratio(opt_df),
+                    zero_bid_ratio,
                 )
                 continue
             screened = screen_options(

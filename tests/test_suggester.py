@@ -227,6 +227,23 @@ def test_screen_options_allows_zero_bid_boundary_chain():
     assert not result.empty
 
 
+def test_screen_options_can_skip_stale_chain_gate():
+    """Callers that pre-screen chains can bypass the duplicate stale-data gate."""
+    zero_row = {"bid": 0.0, "openInterest": 1000}
+    valid_row = {"bid": 1.5, "openInterest": 1000}
+    rows = [zero_row] * 9 + [valid_row]
+    df = _make_options_df(*rows)
+    result = screen_options(
+        df,
+        stock_price=100.0,
+        option_type="put",
+        expiry=_expiry(30),
+        ticker="AAPL",
+        skip_stale_check=True,
+    )
+    assert not result.empty
+
+
 # ── Earnings filter ───────────────────────────────────────────────────────────
 
 
