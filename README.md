@@ -79,7 +79,7 @@ These flags only affect the **monthly** TFSA + RRSP review email (triggered via 
 ## Automated Daily Email via GitHub Actions
 
 The workflow at `.github/workflows/daily_scan.yml` runs the scanner automatically
-every weekday at **11:15 AM Eastern Time** (15:15 UTC during daylight saving time) and emails you the results.
+every weekday at **12:15 PM EDT / 11:15 AM EST** (`16:15 UTC`) and emails you the results.
 This later run avoids the mostly-empty options chains that Yahoo Finance often
 shows right at the open.
 
@@ -129,14 +129,14 @@ You can also trigger the workflow on demand:
 Edit the `cron` line in `.github/workflows/daily_scan.yml`:
 
 ```yaml
-# Current: 15:15 UTC = 11:15 AM ET
-- cron: "15 15 * * 1-5"
+# Current: 16:15 UTC = 12:15 PM EDT / 11:15 AM EST
+- cron: "15 16 * * 1-5"
 
 # Examples:
-# "30 14 * * 1-5"  = 10:30 AM ET
-# "15 15 * * 1-5"  = 11:15 AM ET
-# "0  21 * * 1-5"  = 5:00 PM ET (after-hours recap)
-# "0  14 * * 1-5"  = 10:00 AM ET
+# "30 14 * * 1-5"  = 10:30 AM EDT / 9:30 AM EST
+# "15 16 * * 1-5"  = 12:15 PM EDT / 11:15 AM EST
+# "0  21 * * 1-5"  = 5:00 PM EDT / 4:00 PM EST (after-hours recap)
+# "0  14 * * 1-5"  = 10:00 AM EDT / 9:00 AM EST
 ```
 
 ## Project Layout

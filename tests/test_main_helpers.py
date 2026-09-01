@@ -282,6 +282,7 @@ def test_scan_ticker_only_fetches_expiries_in_dte_window(monkeypatch):
 
     assert fetched_expiries == [_expiry(30)]
     assert len(frames) == 2
+    assert [frame.loc[0, "option_type"] for frame in frames] == ["call", "put"]
     assert diagnostics == {"eligible_expiries": 1, "chains_checked": 2, "stale_chains": 0}
 
 
