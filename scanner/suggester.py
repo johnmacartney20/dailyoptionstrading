@@ -15,6 +15,33 @@ from .config import SCREENING_PARAMS
 
 logger = logging.getLogger(__name__)
 
+ZERO_BID_CHAIN_THRESHOLD = 0.80
+
+
+def get_zero_bid_ratio(options_df: pd.DataFrame) -> float:
+    """Return the fraction of rows whose bid is zero or missing."""
+    if options_df is None or options_df.empty or "bid" not in options_df.columns:
+        return 0.0
+    return float(options_df["bid"].fillna(0).eq(0).sum()) / max(len(options_df), 1)
+
+
+def is_stale_chain(options_df: pd.DataFrame) -> bool:
+    """Return whether the options chain looks stale or unpopulated."""
+    return get_zero_bid_ratio(options_df) > ZERO_BID_CHAIN_THRESHOLD
+
+
+def log_stale_chain_warning(
+    ticker: str,
+    option_type: str,
+    expiry: str,
+    zero_bid_ratio: float,
+) -> None:
+    """Log a standard warning for stale or unpopulated chains."""
+    logger.warning(
+        "Skipping %s %s %s — %.0f%% of bids are zero (stale/bad chain).",
+        ticker, option_type, expiry, zero_bid_ratio * 100,
+    )
+
 # Columns to include in the final suggestions output (in display order).
 OUTPUT_COLUMNS = [
     "ticker",
@@ -55,6 +82,7 @@ def screen_options(
     ticker: str,
     premarket_gap: Optional[float] = None,
     earnings_date: Optional[date] = None,
+    skip_stale_check: bool = False,
 ) -> pd.DataFrame:
     """Enrich and filter *options_df* returning only qualifying candidates.
 
@@ -97,15 +125,11 @@ def screen_options(
     # When >80 % of bids in a chain are zero the feed is almost certainly
     # stale or malformed.  Returning early avoids polluting the run with
     # phantom candidates that survive subsequent filters on a single row.
-    zero_bid_ratio = (
-        options_df["bid"].fillna(0).eq(0).sum() / max(len(options_df), 1)
-    )
-    if zero_bid_ratio > 0.80:
-        logger.warning(
-            "Skipping %s %s %s — %.0f%% of bids are zero (stale/bad chain).",
-            ticker, option_type, expiry, zero_bid_ratio * 100,
-        )
-        return pd.DataFrame()
+    if not skip_stale_check:
+        zero_bid_ratio = get_zero_bid_ratio(options_df)
+        if zero_bid_ratio > ZERO_BID_CHAIN_THRESHOLD:
+            log_stale_chain_warning(ticker, option_type, expiry, zero_bid_ratio)
+            return pd.DataFrame()
 
     # ── Pre-market gap direction filter ──────────────────────────────────────
     # A large downside gap (stock opened ≥ 3 % lower) signals negative near-

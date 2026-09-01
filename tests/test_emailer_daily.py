@@ -165,3 +165,15 @@ def test_daily_email_all_holdings_collapses_to_single_summary_line():
     assert "EXIT" not in html
     assert "FLAG" not in html
     assert "No rows exceeded the action threshold." in html
+
+
+def test_daily_email_reports_degraded_options_feed_when_no_suggestions():
+    html = build_html_email(
+        suggestions=pd.DataFrame(),
+        exchange="all",
+        scan_diagnostics={"stale_chain_ratio": 0.75, "stale_chains": 18, "chains_checked": 24},
+    )
+
+    assert "Top Options Watchlist" in html
+    assert "No qualifying options met filters today, and the feed looked degraded" in html
+    assert "18/24 eligible option chains had mostly zero bids" in html

@@ -1,8 +1,10 @@
 """Unit tests for helper functions in main.py."""
 
+from datetime import date, timedelta
+
 import pandas as pd
 
-from main import _available_account_cash, _record_new_entries
+from main import _available_account_cash, _record_new_entries, scan_ticker
 from scanner.risk import add_position_sizing_columns, filter_unaffordable_trades
 from scanner.portfolio_allocator import (
     PortfolioAllocation,
@@ -13,6 +15,10 @@ from scanner.portfolio_allocator import (
     TfsaStockPortfolio,
     TradeAllocation,
 )
+
+
+def _expiry(days: int = 30) -> str:
+    return (date.today() + timedelta(days=days)).strftime("%Y-%m-%d")
 
 
 def test_available_account_cash_ignores_cash_rows_and_exits():
@@ -248,3 +254,66 @@ def test_always_on_sizing_with_zero_available_cash():
     filtered = filter_unaffordable_trades(sized)
     assert filtered.empty, "No cash available should result in no suggestions"
 
+
+def test_scan_ticker_only_fetches_expiries_in_dte_window(monkeypatch):
+    monkeypatch.setattr("main.SCREENING_PARAMS", {"min_dte": 7, "max_dte": 60})
+    monkeypatch.setattr("main.get_stock_price", lambda ticker: 100.0)
+    short_expiry = _expiry(3)
+    eligible_expiry = _expiry(30)
+    long_expiry = _expiry(90)
+    monkeypatch.setattr(
+        "main.get_expiration_dates",
+        lambda ticker: [short_expiry, eligible_expiry, long_expiry],
+    )
+    monkeypatch.setattr("main.get_earnings_date", lambda ticker: None)
+    monkeypatch.setattr("main.get_premarket_gap", lambda ticker: None)
+
+    fetched_expiries = []
+    option_df = pd.DataFrame([{"strike": 95.0, "bid": 1.5, "openInterest": 1000}])
+
+    def fake_get_options_chain(ticker, expiry):
+        fetched_expiries.append(expiry)
+        return option_df, option_df
+
+    monkeypatch.setattr("main.get_options_chain", fake_get_options_chain)
+    monkeypatch.setattr(
+        "main.screen_options",
+        lambda *args, **kwargs: pd.DataFrame([{"ticker": "AAPL", "option_type": args[2], "score": 1.0}]),
+    )
+
+    frames, diagnostics = scan_ticker("AAPL")
+
+    assert fetched_expiries == [eligible_expiry]
+    assert len(frames) == 2
+    assert [frame.loc[0, "option_type"] for frame in frames] == ["call", "put"]
+    assert diagnostics == {"eligible_expiries": 1, "chains_checked": 2, "stale_chains": 0}
+
+
+def test_scan_ticker_counts_stale_option_chains(monkeypatch):
+    monkeypatch.setattr("main.SCREENING_PARAMS", {"min_dte": 7, "max_dte": 60})
+    monkeypatch.setattr("main.get_stock_price", lambda ticker: 100.0)
+    monkeypatch.setattr("main.get_expiration_dates", lambda ticker: [_expiry(30)])
+    monkeypatch.setattr("main.get_earnings_date", lambda ticker: None)
+    monkeypatch.setattr("main.get_premarket_gap", lambda ticker: None)
+
+    stale_df = pd.DataFrame(
+        [{"strike": 95.0, "bid": 0.0, "openInterest": 1000}] * 9
+        + [{"strike": 95.0, "bid": 1.5, "openInterest": 1000}]
+    )
+
+    monkeypatch.setattr("main.get_options_chain", lambda ticker, expiry: (stale_df, stale_df))
+    monkeypatch.setattr("main.screen_options", lambda *args, **kwargs: pd.DataFrame())
+
+    frames, diagnostics = scan_ticker("AAPL")
+
+    assert frames == []
+    assert diagnostics == {"eligible_expiries": 1, "chains_checked": 2, "stale_chains": 2}
+
+
+def test_scan_ticker_returns_empty_diagnostics_when_price_missing(monkeypatch):
+    monkeypatch.setattr("main.get_stock_price", lambda ticker: None)
+
+    frames, diagnostics = scan_ticker("AAPL")
+
+    assert frames == []
+    assert diagnostics == {"eligible_expiries": 0, "chains_checked": 0, "stale_chains": 0}

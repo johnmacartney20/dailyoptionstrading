@@ -1228,6 +1228,7 @@ def build_html_email(
     portfolio_state_summary: Optional[Dict[str, Any]] = None,
     rejected_candidates: Optional[List[Dict[str, Any]]] = None,
     entered_trades_count: Optional[int] = None,
+    scan_diagnostics: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Return a complete HTML email string for the given *suggestions* DataFrame."""
     today = date.today().strftime("%Y-%m-%d")
@@ -1266,9 +1267,22 @@ def build_html_email(
             f"<p class='compact-note'>Showing top {min(len(ranked), top)} by score.</p>" + _df_to_html_table(ranked, top),
         )
     else:
+        degraded_data_note = ""
+        if scan_diagnostics:
+            stale_ratio = float(scan_diagnostics.get("stale_chain_ratio", 0.0) or 0.0)
+            stale_chains = int(scan_diagnostics.get("stale_chains", 0) or 0)
+            checked_chains = int(scan_diagnostics.get("chains_checked", 0) or 0)
+            if checked_chains > 0 and stale_ratio >= 0.50:
+                degraded_data_note = (
+                    "<p class='compact-note'>No qualifying options met filters today, "
+                    f"and the feed looked degraded ({stale_chains}/{checked_chains} "
+                    "eligible option chains had mostly zero bids). "
+                    "This usually happens near the open when Yahoo Finance options data "
+                    "has not fully populated yet.</p>"
+                )
         html += _visible_section(
             "Top Options Watchlist",
-            "<p class='compact-note'>No qualifying options met filters today.</p>",
+            degraded_data_note or "<p class='compact-note'>No qualifying options met filters today.</p>",
         )
 
     html += _HTML_FOOT
