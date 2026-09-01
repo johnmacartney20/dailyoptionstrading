@@ -105,7 +105,13 @@ from scanner.risk import (
     allocate_under_total_notional,
     filter_unaffordable_trades,
 )
-from scanner.suggester import generate_suggestions, is_stale_chain, screen_options
+from scanner.suggester import (
+    generate_suggestions,
+    get_zero_bid_ratio,
+    is_stale_chain,
+    log_stale_chain_warning,
+    screen_options,
+)
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -714,6 +720,13 @@ def scan_ticker(ticker: str) -> Tuple[List[pd.DataFrame], Dict[str, int]]:
             diagnostics["chains_checked"] += 1
             if is_stale_chain(opt_df):
                 diagnostics["stale_chains"] += 1
+                log_stale_chain_warning(
+                    ticker,
+                    opt_type,
+                    expiry,
+                    get_zero_bid_ratio(opt_df),
+                )
+                continue
             screened = screen_options(
                 opt_df, price, opt_type, expiry, ticker,
                 premarket_gap=premarket_gap,

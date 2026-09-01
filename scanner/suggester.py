@@ -29,6 +29,19 @@ def is_stale_chain(options_df: pd.DataFrame) -> bool:
     """Return whether the options chain looks stale or unpopulated."""
     return get_zero_bid_ratio(options_df) > ZERO_BID_CHAIN_THRESHOLD
 
+
+def log_stale_chain_warning(
+    ticker: str,
+    option_type: str,
+    expiry: str,
+    zero_bid_ratio: float,
+) -> None:
+    """Log a standard warning for stale or unpopulated chains."""
+    logger.warning(
+        "Skipping %s %s %s — %.0f%% of bids are zero (stale/bad chain).",
+        ticker, option_type, expiry, zero_bid_ratio * 100,
+    )
+
 # Columns to include in the final suggestions output (in display order).
 OUTPUT_COLUMNS = [
     "ticker",
@@ -113,10 +126,7 @@ def screen_options(
     # phantom candidates that survive subsequent filters on a single row.
     zero_bid_ratio = get_zero_bid_ratio(options_df)
     if zero_bid_ratio > ZERO_BID_CHAIN_THRESHOLD:
-        logger.warning(
-            "Skipping %s %s %s — %.0f%% of bids are zero (stale/bad chain).",
-            ticker, option_type, expiry, zero_bid_ratio * 100,
-        )
+        log_stale_chain_warning(ticker, option_type, expiry, zero_bid_ratio)
         return pd.DataFrame()
 
     # ── Pre-market gap direction filter ──────────────────────────────────────
