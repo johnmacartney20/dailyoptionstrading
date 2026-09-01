@@ -175,4 +175,5 @@ def test_daily_email_reports_degraded_options_feed_when_no_suggestions():
     )
 
     assert "Top Options Watchlist" in html
-    assert "feed looked degraded (18/24 eligible option chains had mostly zero bids)" in html
+    assert "No qualifying options met filters today, and the feed looked degraded" in html
+    assert "18/24 eligible option chains had mostly zero bids" in html

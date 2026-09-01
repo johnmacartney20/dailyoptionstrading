@@ -40,7 +40,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -666,7 +666,7 @@ def _sync_account_cash_reserves(
             },
         )
 
-def scan_ticker(ticker: str) -> tuple[List[pd.DataFrame], Dict[str, int]]:
+def scan_ticker(ticker: str) -> Tuple[List[pd.DataFrame], Dict[str, int]]:
     """Fetch and screen all qualifying options for *ticker*.
 
     Returns a (possibly empty) list of screened DataFrames, one per
