@@ -258,9 +258,12 @@ def test_always_on_sizing_with_zero_available_cash():
 def test_scan_ticker_only_fetches_expiries_in_dte_window(monkeypatch):
     monkeypatch.setattr("main.SCREENING_PARAMS", {"min_dte": 7, "max_dte": 60})
     monkeypatch.setattr("main.get_stock_price", lambda ticker: 100.0)
+    short_expiry = _expiry(3)
+    eligible_expiry = _expiry(30)
+    long_expiry = _expiry(90)
     monkeypatch.setattr(
         "main.get_expiration_dates",
-        lambda ticker: [_expiry(3), _expiry(30), _expiry(90)],
+        lambda ticker: [short_expiry, eligible_expiry, long_expiry],
     )
     monkeypatch.setattr("main.get_earnings_date", lambda ticker: None)
     monkeypatch.setattr("main.get_premarket_gap", lambda ticker: None)
@@ -280,7 +283,7 @@ def test_scan_ticker_only_fetches_expiries_in_dte_window(monkeypatch):
 
     frames, diagnostics = scan_ticker("AAPL")
 
-    assert fetched_expiries == [_expiry(30)]
+    assert fetched_expiries == [eligible_expiry]
     assert len(frames) == 2
     assert [frame.loc[0, "option_type"] for frame in frames] == ["call", "put"]
     assert diagnostics == {"eligible_expiries": 1, "chains_checked": 2, "stale_chains": 0}
