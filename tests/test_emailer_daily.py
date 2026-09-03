@@ -130,8 +130,6 @@ def test_daily_email_prioritizes_actions_and_groups_rejections():
     )
 
     assert "Action Summary" in html
-    assert html.index("Action Summary") < html.index("Holdings Review")
-    assert "<details><summary><strong>Holdings Review</strong></summary>" in html
     assert "1 actionable review(s) from 3 holdings" in html
     assert "Based on yesterday&apos;s positions: <strong>1</strong> keep, <strong>1</strong> move on from, <strong>1</strong> enter/add today." in html
     assert "Yesterday" in html and "Today" in html and "Decision" in html
@@ -141,7 +139,8 @@ def test_daily_email_prioritizes_actions_and_groups_rejections():
     assert "Model Holdings Snapshot" not in html
     assert "NVDA" in html and "2" in html
     assert "Portfolio Actions" not in html
-    assert "Rebalance Actions" in html
+    assert "Holdings Review" not in html
+    assert "Rebalance Actions" not in html
     assert "MOVE ON + ENTER" in html
     assert "MFC.TO" in html
     assert "Top Options Watchlist" in html
@@ -196,7 +195,7 @@ def test_daily_email_all_holdings_collapses_to_single_summary_line():
     assert "2/2 HOLD, no action needed" in html
     assert "EXIT" not in html
     assert "FLAG" not in html
-    assert "No rows exceeded the action threshold." in html
+    assert "Holdings Review" not in html
 
 
 def test_daily_email_reports_degraded_options_feed_when_no_suggestions():
@@ -211,7 +210,7 @@ def test_daily_email_reports_degraded_options_feed_when_no_suggestions():
     assert "18/24 eligible option chains had mostly zero bids" in html
 
 
-def test_daily_email_rebalance_actions_handles_sell_keep_and_empty_states():
+def test_daily_email_action_summary_handles_rebalance_states_without_extra_sections():
     sell_html = build_html_email(
         suggestions=pd.DataFrame(),
         exchange="all",
@@ -248,5 +247,7 @@ def test_daily_email_rebalance_actions_handles_sell_keep_and_empty_states():
     assert "NVDA" in sell_html
     assert "$-500.00" in sell_html
     assert "Yesterday" in sell_html and "Today" in sell_html and "Decision" in sell_html
-    assert "No sell, trim, or buy changes needed versus current holdings." in keep_only_html
-    assert "No rebalance actions generated today." in empty_html
+    assert "Based on yesterday&apos;s positions: <strong>1</strong> keep, <strong>0</strong> move on from, <strong>0</strong> enter/add today." in keep_only_html
+    assert "Rebalance Actions" not in sell_html
+    assert "Rebalance Actions" not in keep_only_html
+    assert "Rebalance Actions" not in empty_html

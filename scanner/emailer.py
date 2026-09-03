@@ -1378,15 +1378,6 @@ def build_html_email(
         entered_trades_count=entered_trades_count,
     )
 
-    if holdings_review is not None:
-        holdings_body = _collapsed_holdings_review_html(
-            holdings_review,
-            _DAILY_REVIEW_DELTA_THRESHOLD,
-        )
-        html += _visible_section("Holdings Review", holdings_body)
-
-    html += _visible_section("Rebalance Actions", _rebalance_actions_html(rebalance_plan))
-
     if suggestions is not None and not suggestions.empty and "option_type" in suggestions.columns:
         ranked = suggestions.sort_values("score", ascending=False) if "score" in suggestions.columns else suggestions
         html += _visible_section(
