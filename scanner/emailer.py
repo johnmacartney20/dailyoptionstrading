@@ -94,8 +94,6 @@ _STRATEGY_LABELS = {
     "put": "Cash-Secured Puts (sell put, set aside cash)",
 }
 
-_DAILY_REVIEW_DELTA_THRESHOLD = 15.0
-
 # Columns to include in the email table and their display names.
 _EMAIL_COLUMNS = {
     "ticker": "Ticker",
@@ -275,74 +273,6 @@ def _grouped_rejected_candidates_html(rejected_candidates: Optional[List[Dict[st
     return "".join(lines)
 
 
-def _collapsed_holdings_review_html(
-    review_df: Optional[pd.DataFrame],
-    delta_threshold: float,
-) -> str:
-    if review_df is None or review_df.empty:
-        return "<p>No active holdings to review today.</p>"
-
-    df = review_df.copy()
-    if "verdict_tag" in df.columns:
-        df["verdict"] = df["verdict_tag"].fillna(df.get("verdict", ""))
-    if "score_delta" not in df.columns:
-        df["score_delta"] = 0.0
-    if "verdict" not in df.columns:
-        df["verdict"] = ""
-
-    verdicts = df["verdict"].astype(str).str.upper()
-    deltas = pd.to_numeric(df["score_delta"], errors="coerce").fillna(0.0).abs()
-    noteworthy = df[(verdicts != "HOLD") | (deltas > delta_threshold)].copy()
-
-    total = len(df)
-    noteworthy_count = len(noteworthy)
-    holds = int((verdicts == "HOLD").sum())
-    exit_count = int(verdicts.str.startswith("EXIT").sum())
-    flag_count = int(verdicts.str.startswith("FLAG").sum())
-    large_delta_count = max(noteworthy_count - exit_count - flag_count, 0)
-
-    body = (
-        f"<p class='compact-note'>{total} holdings reviewed, {noteworthy_count} noteworthy rows, "
-        f"{holds} HOLD.</p>"
-    )
-
-    if noteworthy.empty:
-        body += "<p>No rows exceeded the action threshold.</p>"
-        return body
-
-    display = noteworthy[[c for c in [
-        "ticker", "account", "sub_portfolio", "entry_score", "current_score",
-        "score_delta", "days_held", "verdict", "reason",
-    ] if c in noteworthy.columns]].copy()
-    rename = {
-        "ticker": "Ticker",
-        "account": "Account",
-        "sub_portfolio": "Sub-Portfolio",
-        "entry_score": "Entry Score",
-        "current_score": "Current Score",
-        "score_delta": "Delta",
-        "days_held": "Days Held",
-        "verdict": "Verdict",
-        "reason": "Reason",
-    }
-    display.columns = [rename.get(column, column) for column in display.columns]
-    for column in ["Entry Score", "Current Score", "Delta"]:
-        if column in display.columns:
-            display[column] = pd.to_numeric(display[column], errors="coerce").fillna(0.0).round(2)
-
-    headers = "".join(f"<th>{escape(str(heading))}</th>" for heading in display.columns)
-    rows_html = ""
-    for _, row in display.iterrows():
-        rows_html += "<tr>" + "".join(f"<td>{escape(str(value))}</td>" for value in row) + "</tr>"
-
-    body += (
-        f"<p class='compact-note'>EXIT: {exit_count} | FLAG: {flag_count} | "
-        f"|Δ| &gt; {delta_threshold:.0f}: {large_delta_count}</p>"
-    )
-    body += f'<table class="compact-table"><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table>'
-    return body
-
-
 def _rebalance_action_rows(
     rebalance_plan: Optional[List[Dict[str, Any]]],
     *,
@@ -394,29 +324,6 @@ def _rebalance_action_rows(
                 }
             )
     return rows
-
-
-def _rebalance_actions_html(rebalance_plan: Optional[List[Dict[str, Any]]]) -> str:
-    rows = _rebalance_action_rows(rebalance_plan, include_keep=False)
-    if rebalance_plan is None:
-        return "<p>No rebalance actions generated today.</p>"
-    if not rebalance_plan:
-        return "<p>No rebalance actions generated today.</p>"
-    if not rows:
-        return "<p>No sell, trim, or buy changes needed versus current holdings.</p>"
-
-    display = pd.DataFrame(rows)[["Account", "Sleeve", "Yesterday", "Today", "Decision", "Capital $", "Reason"]].copy()
-    display["Yesterday"] = display["Yesterday"].replace("", "—")
-    display["Today"] = display["Today"].replace("", "—")
-    headers = "".join(f"<th>{escape(str(heading))}</th>" for heading in display.columns)
-    rows_html = ""
-    for _, row in display.iterrows():
-        rows_html += "<tr>" + "".join(f"<td>{escape(str(value))}</td>" for value in row) + "</tr>"
-
-    return (
-        "<p class='compact-note'>Actions are derived from current holdings versus today's target portfolio.</p>"
-        f'<table class="compact-table"><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table>'
-    )
 
 
 def _visible_section(title: str, body_html: str) -> str:
@@ -511,83 +418,6 @@ def _render_daily_action_summary(
         html += f'<table class="compact-table"><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table>'
 
     html += f'<p class="action-line">New trades entered: <strong>{new_trades}</strong></p>'
-    html += "</div>"
-    return html
-
-
-def _holdings_review_to_html(review_df: pd.DataFrame) -> str:
-    """Render holdings review table (portfolio-first section)."""
-    html = '<div class="port-box">'
-    html += "<h2>🔎 Holdings Review — Daily Re-Score</h2>"
-
-    if review_df is None or review_df.empty:
-        html += "<p>No active holdings to review today.</p></div>"
-        return html
-
-    if "verdict_tag" in review_df.columns:
-        review_df = review_df.copy()
-        review_df["verdict"] = review_df["verdict_tag"].fillna(review_df.get("verdict", ""))
-
-    if {"account", "account_capital", "pct_of_account", "verdict"}.issubset(set(review_df.columns)):
-        live = review_df[~review_df["verdict"].astype(str).str.upper().str.startswith("EXIT")].copy()
-        lines: List[str] = []
-        caps = {"TFSA": 5, "FHSA": 4, "RRSP": 4}
-        for account in ["TFSA", "FHSA", "RRSP"]:
-            sub = live[live["account"].astype(str).str.upper() == account]
-            cap = float(pd.to_numeric(sub.get("account_capital"), errors="coerce").fillna(0.0).max()) if not sub.empty else 0.0
-            avg_pct = float(pd.to_numeric(sub.get("pct_of_account"), errors="coerce").fillna(0.0).mean()) if not sub.empty else 0.0
-            lines.append(f"{account}: ${cap:,.0f} | {len(sub)}/{caps[account]} cap used | avg position {avg_pct:.0f}%")
-
-        options_live = live[live["account"].astype(str).str.upper() == "OPTIONS"]
-        options_cap = float(pd.to_numeric(options_live.get("account_capital"), errors="coerce").fillna(0.0).max()) if not options_live.empty else 20_000.0
-        spreads = options_live[options_live["sub_portfolio"].astype(str).str.lower() == "put-spread"]
-        stock = options_live[options_live["sub_portfolio"].astype(str).str.lower() != "put-spread"]
-        over = max(len(stock) - 2, 0)
-        opt_line = (
-            f"OPTIONS: ${options_cap:,.0f} | Spreads ${options_cap * 0.50:,.0f} ({len(spreads)} open) | "
-            f"Stock ${options_cap * 0.50:,.0f} ({len(stock)} positions"
-        )
-        if over > 0:
-            opt_line += ", over 2-name cap - trimming today"
-        opt_line += ")"
-        lines.append(opt_line)
-
-        html += "<ul class='action-list'>"
-        for line in lines:
-            html += f"<li>{line}</li>"
-        html += "</ul>"
-
-    cols = [
-        "ticker",
-        "account",
-        "sub_portfolio",
-        "entry_score",
-        "current_score",
-        "score_delta",
-        "days_held",
-        "verdict",
-        "reason",
-    ]
-    display = review_df[[c for c in cols if c in review_df.columns]].copy()
-    rename = {
-        "ticker": "Ticker",
-        "account": "Account",
-        "sub_portfolio": "Sub-Portfolio",
-        "entry_score": "Entry Score",
-        "current_score": "Current Score",
-        "score_delta": "Delta",
-        "days_held": "Days Held",
-        "verdict": "Verdict",
-        "reason": "Reason",
-    }
-    display.columns = [rename.get(c, c) for c in display.columns]
-
-    headers = "".join(f"<th>{h}</th>" for h in display.columns)
-    rows = ""
-    for _, row in display.iterrows():
-        cells = "".join(f"<td>{v}</td>" for v in row)
-        rows += f"<tr>{cells}</tr>"
-    html += f"<table><thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table>"
     html += "</div>"
     return html
 
@@ -1377,15 +1207,6 @@ def build_html_email(
         rebalance_plan=rebalance_plan,
         entered_trades_count=entered_trades_count,
     )
-
-    if holdings_review is not None:
-        holdings_body = _collapsed_holdings_review_html(
-            holdings_review,
-            _DAILY_REVIEW_DELTA_THRESHOLD,
-        )
-        html += _visible_section("Holdings Review", holdings_body)
-
-    html += _visible_section("Rebalance Actions", _rebalance_actions_html(rebalance_plan))
 
     if suggestions is not None and not suggestions.empty and "option_type" in suggestions.columns:
         ranked = suggestions.sort_values("score", ascending=False) if "score" in suggestions.columns else suggestions
