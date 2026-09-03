@@ -19,6 +19,7 @@ from collections import Counter
 from datetime import date
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from html import escape
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -385,7 +386,7 @@ def _rebalance_actions_html(rebalance_plan: Optional[List[Dict[str, Any]]]) -> s
     headers = "".join(f"<th>{heading}</th>" for heading in display.columns)
     rows_html = ""
     for _, row in display.iterrows():
-        rows_html += "<tr>" + "".join(f"<td>{value}</td>" for value in row) + "</tr>"
+        rows_html += "<tr>" + "".join(f"<td>{escape(str(value))}</td>" for value in row) + "</tr>"
 
     return (
         "<p class='compact-note'>Actions are derived from current holdings versus today's target portfolio.</p>"
