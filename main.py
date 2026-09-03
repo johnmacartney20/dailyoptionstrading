@@ -81,6 +81,7 @@ from scanner.portfolio_allocator import (
     RrspPortfolio,
     TfsaAllocation,
     TfsaStockPortfolio,
+    _are_correlated,
     allocate_fhsa_stock_portfolio,
     allocate_portfolio,
     allocate_rrsp_portfolio,
@@ -1207,6 +1208,52 @@ def _ticker_family_key(ticker: str) -> str:
     return t
 
 
+def _position_conviction_score(pos: dict) -> float:
+    """Return a comparable conviction score for a current holding."""
+    score = pos.get("last_review_score", None)
+    if score is None:
+        score = pos.get("entry_composite_score", None)
+    try:
+        val = float(score)
+    except (TypeError, ValueError):
+        return float("inf")
+    if not math.isfinite(val):
+        return float("inf")
+    return val
+
+
+def _is_correlated_holding(candidate_ticker: str, buy_ticker: str) -> bool:
+    if _ticker_family_key(candidate_ticker) == _ticker_family_key(buy_ticker):
+        return True
+    return _are_correlated(candidate_ticker.upper(), buy_ticker.upper())
+
+
+def _select_funding_sell(
+    sell_pool: list[dict],
+    buy_ticker: str,
+    capital_needed: float,
+) -> Optional[dict]:
+    """Pick one funding sell that can free *capital_needed* for *buy_ticker*."""
+    required = max(float(capital_needed), 0.0)
+    if required <= 0:
+        return None
+
+    eligible = [c for c in sell_pool if float(c.get("remaining_value", 0.0) or 0.0) >= required]
+    if not eligible:
+        return None
+
+    ranked = sorted(
+        eligible,
+        key=lambda c: (
+            0 if str(c.get("status", "")).upper().startswith("EXIT") else 1,
+            float(c.get("score", float("inf"))),
+            0 if _is_correlated_holding(str(c.get("ticker", "")), buy_ticker) else 1,
+            float(c.get("remaining_value", 0.0)),
+        ),
+    )
+    return ranked[0] if ranked else None
+
+
 def _rebalance_actions_for_account(
     state: dict,
     account_type: str,
@@ -1225,19 +1272,29 @@ def _rebalance_actions_for_account(
 
     current_map: dict[str, float] = {}
     current_labels: dict[str, set[str]] = {}
+    current_qty_map: dict[str, int] = {}
     for p in current_positions:
         raw_ticker = str(p.get("ticker", "")).upper()
         key = _ticker_family_key(raw_ticker)
         current_map[key] = current_map.get(key, 0.0) + _position_book_value(p)
         current_labels.setdefault(key, set()).add(raw_ticker)
+        qty = int(float(p.get("quantity", 0.0) or 0.0))
+        current_qty_map[key] = current_qty_map.get(key, 0) + max(qty, 0)
 
     target_map: dict[str, float] = {}
     target_labels: dict[str, set[str]] = {}
+    target_qty_map: dict[str, int] = {}
     for r in target_rows:
         raw_ticker = str(r.get("ticker", "")).upper()
         key = _ticker_family_key(raw_ticker)
         target_map[key] = target_map.get(key, 0.0) + float(r.get("allocation", 0.0) or 0.0)
         target_labels.setdefault(key, set()).add(raw_ticker)
+        qty_raw = r.get("quantity", 0)
+        try:
+            qty_int = int(float(qty_raw or 0.0))
+        except (TypeError, ValueError):
+            qty_int = 0
+        target_qty_map[key] = target_qty_map.get(key, 0) + max(qty_int, 0)
 
     actions: list[dict] = []
     all_keys = sorted(set(current_map) | set(target_map))
@@ -1259,6 +1316,7 @@ def _rebalance_actions_for_account(
                     "current": cur_val,
                     "target": tgt_val,
                     "delta": -cur_val,
+                    "quantity": current_qty_map.get(key, 0),
                     "reason": "not in target portfolio",
                 }
             )
@@ -1272,6 +1330,7 @@ def _rebalance_actions_for_account(
                     "current": cur_val,
                     "target": tgt_val,
                     "delta": tgt_val,
+                    "quantity": target_qty_map.get(key, 0),
                     "reason": "new target position",
                 }
             )
@@ -1297,6 +1356,7 @@ def _rebalance_actions_for_account(
                     "current": cur_val,
                     "target": tgt_val,
                     "delta": delta,
+                    "quantity": target_qty_map.get(key, 0),
                     "reason": "below target allocation",
                 }
             )
@@ -1308,11 +1368,113 @@ def _rebalance_actions_for_account(
                     "current": cur_val,
                     "target": tgt_val,
                     "delta": delta,
+                    "quantity": current_qty_map.get(key, 0),
                     "reason": "above target allocation",
                 }
             )
 
     current_total = sum(current_map.values())
+    available_cash = max(float(capital) - float(current_total), 0.0)
+
+    sell_pool: list[dict] = []
+    for p in current_positions:
+        ticker = str(p.get("ticker", "")).upper()
+        value = max(_position_book_value(p), 0.0)
+        qty = max(int(float(p.get("quantity", 0.0) or 0.0)), 0)
+        if value <= 0 or qty <= 0:
+            continue
+        sell_pool.append(
+            {
+                "ticker": ticker,
+                "status": str(p.get("status", "")).upper(),
+                "score": _position_conviction_score(p),
+                "remaining_value": value,
+                "remaining_qty": qty,
+            }
+        )
+
+    constrained_actions: list[dict] = []
+    funding_by_ticker: dict[str, dict[str, float]] = {}
+    for action in actions:
+        act = str(action.get("action", "")).upper()
+        if act not in {"BUY", "BUY_MORE"}:
+            constrained_actions.append(action)
+            continue
+
+        required = max(float(action.get("delta", 0.0) or 0.0), 0.0)
+        if required <= available_cash:
+            available_cash -= required
+            constrained_actions.append(action)
+            continue
+
+        shortfall = required - available_cash
+        sell_choice = _select_funding_sell(
+            sell_pool=sell_pool,
+            buy_ticker=str(action.get("ticker", "")),
+            capital_needed=shortfall,
+        )
+        if sell_choice is None:
+            continue
+
+        per_unit = float(sell_choice["remaining_value"]) / max(int(sell_choice["remaining_qty"]), 1)
+        sell_qty = max(int(math.ceil(shortfall / max(per_unit, 1e-9))), 1)
+        sell_qty = min(sell_qty, int(sell_choice["remaining_qty"]))
+        capital_freed = min(float(sell_choice["remaining_value"]), sell_qty * per_unit)
+        available_cash = max(available_cash + capital_freed - required, 0.0)
+        sell_choice["remaining_qty"] = max(int(sell_choice["remaining_qty"]) - sell_qty, 0)
+        sell_choice["remaining_value"] = max(float(sell_choice["remaining_value"]) - capital_freed, 0.0)
+        ticker_key = str(sell_choice["ticker"]).upper()
+        used = funding_by_ticker.setdefault(ticker_key, {"value": 0.0, "qty": 0.0})
+        used["value"] += float(capital_freed)
+        used["qty"] += float(sell_qty)
+
+        constrained_actions.append(
+            {
+                "action": "SWAP",
+                "sell_ticker": str(sell_choice["ticker"]),
+                "sell_qty": int(sell_qty),
+                "buy_ticker": str(action.get("ticker", "")),
+                "buy_qty": int(action.get("quantity", 0) or 0),
+                "capital_freed": round(capital_freed, 2),
+                "capital_required": round(required, 2),
+                "net_cash_impact": round(capital_freed - required, 2),
+                "reason": "capital-constrained buy linked to funding sell",
+            }
+        )
+
+    if funding_by_ticker:
+        adjusted_actions: list[dict] = []
+        for action in constrained_actions:
+            act = str(action.get("action", "")).upper()
+            ticker = str(action.get("ticker", "")).upper()
+            used = funding_by_ticker.get(ticker)
+            if act not in {"SELL", "TRIM"} or not used:
+                adjusted_actions.append(action)
+                continue
+
+            current_val = max(float(action.get("current", 0.0) or 0.0), 0.0)
+            delta_val = float(action.get("delta", 0.0) or 0.0)
+            sell_amount = max(-delta_val, 0.0)
+            applied_value = min(float(used["value"]), sell_amount)
+            remaining_sell = max(sell_amount - applied_value, 0.0)
+            if remaining_sell <= 0.0:
+                used["value"] = max(float(used["value"]) - applied_value, 0.0)
+                continue
+
+            qty = int(float(action.get("quantity", 0) or 0))
+            per_unit = (current_val / qty) if qty > 0 and current_val > 0 else 0.0
+            reduced_qty = int(math.ceil(applied_value / per_unit)) if per_unit > 0 else 0
+            new_qty = max(qty - reduced_qty, 0)
+            used["value"] = max(float(used["value"]) - applied_value, 0.0)
+            used["qty"] = max(float(used["qty"]) - float(reduced_qty), 0.0)
+
+            action["delta"] = -remaining_sell
+            action["quantity"] = new_qty
+            action["reason"] = f"{action.get('reason', '')}; adjusted after swap funding".strip("; ")
+            adjusted_actions.append(action)
+        constrained_actions = adjusted_actions
+
+    actions = constrained_actions
     target_total = sum(target_map.values())
     suggested_cash = max(capital - target_total, 0.0)
     return {
@@ -1336,23 +1498,63 @@ def _build_rebalance_plan(
     fhsa_stock: TfsaStockPortfolio,
 ) -> list[dict]:
     """Build account-level rebalance plan from current state vs model targets."""
+    def _safe_qty(allocation: float, unit_cost: float) -> int:
+        try:
+            alloc = float(allocation)
+            unit = float(unit_cost)
+        except (TypeError, ValueError):
+            return 0
+        if not math.isfinite(alloc) or not math.isfinite(unit) or alloc <= 0 or unit <= 0:
+            return 0
+        return max(int(alloc // unit), 1)
+
     tfsa_targets = [
-        {"ticker": t.ticker, "allocation": t.allocation} for t in tfsa_stock.selected
+        {
+            "ticker": t.ticker,
+            "allocation": t.allocation,
+            "quantity": _safe_qty(t.allocation, t.current_price),
+        }
+        for t in tfsa_stock.selected
     ]
     rrsp_targets = [
-        {"ticker": t.ticker, "allocation": t.allocation} for t in rrsp.selected
+        {
+            "ticker": t.ticker,
+            "allocation": t.allocation,
+            "quantity": _safe_qty(t.allocation, t.current_price),
+        }
+        for t in rrsp.selected
     ]
     fhsa_targets = [
-        {"ticker": t.ticker, "allocation": t.allocation} for t in fhsa_stock.selected
+        {
+            "ticker": t.ticker,
+            "allocation": t.allocation,
+            "quantity": _safe_qty(t.allocation, t.current_price),
+        }
+        for t in fhsa_stock.selected
     ]
     nonreg_targets = [
-        {"ticker": t.ticker, "allocation": t.allocation} for t in portfolio.selected
+        {
+            "ticker": t.ticker,
+            "allocation": t.allocation,
+            "quantity": _safe_qty(t.allocation, t.max_loss),
+        }
+        for t in portfolio.selected
     ]
     nonreg_stock_targets = [
-        {"ticker": t.ticker, "allocation": t.allocation} for t in options_stock.selected
+        {
+            "ticker": t.ticker,
+            "allocation": t.allocation,
+            "quantity": _safe_qty(t.allocation, t.current_price),
+        }
+        for t in options_stock.selected
     ]
     tfsa_option_targets = [
-        {"ticker": t.ticker, "allocation": t.allocation} for t in tfsa_opts.selected
+        {
+            "ticker": t.ticker,
+            "allocation": t.allocation,
+            "quantity": _safe_qty(t.allocation, t.max_loss),
+        }
+        for t in tfsa_opts.selected
     ]
 
     return [
@@ -1424,6 +1626,24 @@ def _print_rebalance_plan(plan: list[dict]) -> None:
         )
         if not actions:
             print("  No current or target positions in this sleeve.")
+            continue
+
+        swap_actions = [a for a in actions if str(a.get("action", "")).upper() == "SWAP"]
+        for s in swap_actions:
+            print(
+                "  "
+                f"SWAP: SELL [{s.get('sell_ticker', '')}, {int(s.get('sell_qty', 0) or 0)}] "
+                f"\u2192 BUY [{s.get('buy_ticker', '')}, {int(s.get('buy_qty', 0) or 0)}]"
+            )
+            print(
+                "  "
+                f"Capital freed: ${float(s.get('capital_freed', 0.0) or 0.0):,.2f} | "
+                f"Capital required: ${float(s.get('capital_required', 0.0) or 0.0):,.2f} | "
+                f"Net cash impact: ${float(s.get('net_cash_impact', 0.0) or 0.0):,.2f}"
+            )
+
+        actions = [a for a in actions if str(a.get("action", "")).upper() != "SWAP"]
+        if not actions and swap_actions:
             continue
 
         priority = {"SELL": 0, "TRIM": 1, "BUY": 2, "BUY_MORE": 3, "KEEP": 4}
