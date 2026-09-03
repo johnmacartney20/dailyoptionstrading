@@ -1,16 +1,16 @@
 name: Daily Options Scan
 
 on:
-  # Runs at 16:15 UTC on weekdays = 12:15 PM EDT / 11:15 AM EST
-  # This intentionally waits until well after the open so Yahoo's options
-  # chains have live bids instead of the mostly-zero chains often seen at 9:30 ET.
+  # Runs at 14:30 UTC on weekdays = 10:30 AM EDT / 9:30 AM EST
+  # This runs closer to the start of the trading day while still avoiding
+  # the very earliest opening-minute noise in options chains during DST.
   # Adjust the cron expression if you want a different time:
-  #   "30 14 * * 1-5"  = 10:30 AM EDT / 9:30 AM EST
   #   "15 16 * * 1-5"  = 12:15 PM EDT / 11:15 AM EST
+  #   "30 14 * * 1-5"  = 10:30 AM EDT / 9:30 AM EST
   #   "30 16 * * 1-5"  = 12:30 PM EDT / 11:30 AM EST
   #   "0  21 * * 1-5"  = 5:00 PM EDT / 4:00 PM EST (after-hours)
   schedule:
-    - cron: "15 16 * * 1-5"
+    - cron: "30 14 * * 1-5"
 
   # Also allows triggering manually from the GitHub Actions tab
   workflow_dispatch:
