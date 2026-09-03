@@ -141,9 +141,11 @@ def _sum_numeric_column(frame: Optional[pd.DataFrame], column: str) -> float:
 
 def _combined_allocation_rows(
     portfolio: Optional[PortfolioAllocation],
+    options_stock: Optional[TfsaStockPortfolio],
     tfsa_allocation: Optional[TfsaAllocation],
     tfsa_stock: Optional[TfsaStockPortfolio],
     rrsp: Optional[RrspPortfolio],
+    fhsa_stock: Optional[TfsaStockPortfolio],
 ) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
 
@@ -171,6 +173,18 @@ def _combined_allocation_rows(
                 }
             )
 
+    if options_stock is not None:
+        for item in getattr(options_stock, "selected", []) or []:
+            rows.append(
+                {
+                    "ticker": item.ticker,
+                    "account": "OPTIONS",
+                    "action": "Buy stock",
+                    "allocation_pct": item.pct_of_portfolio,
+                    "allocation": item.allocation,
+                }
+            )
+
     if tfsa_stock is not None:
         for item in getattr(tfsa_stock, "selected", []) or []:
             rows.append(
@@ -189,6 +203,18 @@ def _combined_allocation_rows(
                 {
                     "ticker": item.ticker,
                     "account": "RRSP",
+                    "action": "Buy stock",
+                    "allocation_pct": item.pct_of_portfolio,
+                    "allocation": item.allocation,
+                }
+            )
+
+    if fhsa_stock is not None:
+        for item in getattr(fhsa_stock, "selected", []) or []:
+            rows.append(
+                {
+                    "ticker": item.ticker,
+                    "account": "FHSA",
                     "action": "Buy stock",
                     "allocation_pct": item.pct_of_portfolio,
                     "allocation": item.allocation,
@@ -316,6 +342,57 @@ def _collapsed_holdings_review_html(
     return body
 
 
+def _rebalance_actions_html(rebalance_plan: Optional[List[Dict[str, Any]]]) -> str:
+    if not rebalance_plan:
+        return "<p>No rebalance actions generated today.</p>"
+
+    rows: List[Dict[str, Any]] = []
+    for account_plan in rebalance_plan:
+        account = str(account_plan.get("account", ""))
+        sleeve = str(account_plan.get("sub_portfolio", ""))
+        for action in account_plan.get("actions", []) or []:
+            act = str(action.get("action", "")).upper()
+            if act == "KEEP":
+                continue
+            if act == "SWAP":
+                rows.append(
+                    {
+                        "Account": account,
+                        "Sleeve": sleeve,
+                        "Action": "SWAP",
+                        "Ticker": f"{action.get('sell_ticker', '')} → {action.get('buy_ticker', '')}",
+                        "Capital $": f"${float(action.get('capital_required', 0.0) or 0.0):,.2f}",
+                        "Reason": str(action.get("reason", "")),
+                    }
+                )
+                continue
+
+            rows.append(
+                {
+                    "Account": account,
+                    "Sleeve": sleeve,
+                    "Action": act,
+                    "Ticker": str(action.get("ticker", "")),
+                    "Capital $": f"${abs(float(action.get('delta', 0.0) or 0.0)):,.2f}",
+                    "Reason": str(action.get("reason", "")),
+                }
+            )
+
+    if not rows:
+        return "<p>No sell, trim, or buy changes needed versus current holdings.</p>"
+
+    display = pd.DataFrame(rows)[["Account", "Sleeve", "Action", "Ticker", "Capital $", "Reason"]]
+    headers = "".join(f"<th>{heading}</th>" for heading in display.columns)
+    rows_html = ""
+    for _, row in display.iterrows():
+        rows_html += "<tr>" + "".join(f"<td>{value}</td>" for value in row) + "</tr>"
+
+    return (
+        "<p class='compact-note'>Actions are derived from current holdings versus today's target portfolio.</p>"
+        f'<table class="compact-table"><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table>'
+    )
+
+
 def _visible_section(title: str, body_html: str) -> str:
     return (
         '<div class="port-box">'
@@ -328,9 +405,11 @@ def _render_daily_action_summary(
     holdings_review: Optional[pd.DataFrame],
     portfolio_state_summary: Optional[Dict[str, Any]],
     portfolio: Optional[PortfolioAllocation],
+    options_stock: Optional[TfsaStockPortfolio],
     tfsa_allocation: Optional[TfsaAllocation],
     tfsa_stock: Optional[TfsaStockPortfolio],
     rrsp: Optional[RrspPortfolio],
+    fhsa_stock: Optional[TfsaStockPortfolio],
     entered_trades_count: Optional[int] = None,
 ) -> str:
     review_df = holdings_review.copy() if holdings_review is not None else pd.DataFrame()
@@ -355,7 +434,14 @@ def _render_daily_action_summary(
         exits = int(by_status.get("EXIT", 0) or 0)
         flags = int(by_status.get("FLAG", 0) or 0)
 
-    allocation_rows = _combined_allocation_rows(portfolio, tfsa_allocation, tfsa_stock, rrsp)
+    allocation_rows = _combined_allocation_rows(
+        portfolio,
+        options_stock,
+        tfsa_allocation,
+        tfsa_stock,
+        rrsp,
+        fhsa_stock,
+    )
     new_trades = int(entered_trades_count) if entered_trades_count is not None else len(allocation_rows)
     trade_breakdown = _allocation_breakdown(allocation_rows)
     html = '<div class="daily-action">'
@@ -1221,14 +1307,17 @@ def build_html_email(
     exchange: str,
     top: int = 10,
     portfolio: Optional[PortfolioAllocation] = None,
+    options_stock: Optional[TfsaStockPortfolio] = None,
     tfsa_allocation: Optional[TfsaAllocation] = None,
     tfsa_stock: Optional[TfsaStockPortfolio] = None,
     rrsp: Optional[RrspPortfolio] = None,
+    fhsa_stock: Optional[TfsaStockPortfolio] = None,
     holdings_review: Optional[pd.DataFrame] = None,
     portfolio_state_summary: Optional[Dict[str, Any]] = None,
     rejected_candidates: Optional[List[Dict[str, Any]]] = None,
     entered_trades_count: Optional[int] = None,
     scan_diagnostics: Optional[Dict[str, Any]] = None,
+    rebalance_plan: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """Return a complete HTML email string for the given *suggestions* DataFrame."""
     today = date.today().strftime("%Y-%m-%d")
@@ -1238,9 +1327,11 @@ def build_html_email(
         holdings_review=holdings_review,
         portfolio_state_summary=portfolio_state_summary,
         portfolio=portfolio,
+        options_stock=options_stock,
         tfsa_allocation=tfsa_allocation,
         tfsa_stock=tfsa_stock,
         rrsp=rrsp,
+        fhsa_stock=fhsa_stock,
         entered_trades_count=entered_trades_count,
     )
 
@@ -1251,7 +1342,14 @@ def build_html_email(
         )
         html += _visible_section("Holdings Review", holdings_body)
 
-    allocation_rows = _combined_allocation_rows(portfolio, tfsa_allocation, tfsa_stock, rrsp)
+    allocation_rows = _combined_allocation_rows(
+        portfolio,
+        options_stock,
+        tfsa_allocation,
+        tfsa_stock,
+        rrsp,
+        fhsa_stock,
+    )
     html += _visible_section(
         "Portfolio Actions",
         (
@@ -1259,6 +1357,7 @@ def build_html_email(
             + _combined_allocation_table_html(allocation_rows)
         ),
     )
+    html += _visible_section("Rebalance Actions", _rebalance_actions_html(rebalance_plan))
 
     if suggestions is not None and not suggestions.empty and "option_type" in suggestions.columns:
         ranked = suggestions.sort_values("score", ascending=False) if "score" in suggestions.columns else suggestions

@@ -2310,14 +2310,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             exchange=args.exchange,
             top=args.top,
             portfolio=portfolio,
+            options_stock=options_stock,
             tfsa_allocation=tfsa_opts,
             tfsa_stock=tfsa_stock,
             rrsp=rrsp,
+            fhsa_stock=fhsa_stock,
             holdings_review=reviews_df,
             portfolio_state_summary=state_summary,
             rejected_candidates=rejected_candidates,
             entered_trades_count=entered_trades_count,
             scan_diagnostics=scan_diagnostics,
+            rebalance_plan=rebalance_plan,
         )
         try:
             send_email(
