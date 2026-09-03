@@ -244,8 +244,9 @@ def test_daily_email_rebalance_actions_handles_sell_keep_and_empty_states():
         rebalance_plan=[],
     )
 
-    assert "SELL" in sell_html
+    assert "MOVE ON" in sell_html
     assert "NVDA" in sell_html
     assert "$-500.00" in sell_html
+    assert "Yesterday" in sell_html and "Today" in sell_html and "Decision" in sell_html
     assert "No sell, trim, or buy changes needed versus current holdings." in keep_only_html
     assert "No rebalance actions generated today." in empty_html
