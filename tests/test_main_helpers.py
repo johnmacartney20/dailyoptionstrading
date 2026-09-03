@@ -439,3 +439,60 @@ def test_rebalance_breaks_ties_with_correlation():
     swap_rows = [a for a in plan["actions"] if a.get("action") == "SWAP"]
     assert len(swap_rows) == 1
     assert swap_rows[0]["sell_ticker"] == "AAPL"
+
+
+def test_rebalance_drops_unfundable_buy_without_naked_suggestion():
+    state = {
+        "positions": [
+            {
+                "ticker": "SHOP",
+                "account_type": "TFSA",
+                "sub_portfolio": "growth",
+                "status": "HOLD",
+                "entry_price": 10.0,
+                "quantity": 10,
+                "entry_composite_score": 65.0,
+                "last_review_score": 65.0,
+                "metadata": {},
+            }
+        ]
+    }
+    plan = _rebalance_actions_for_account(
+        state=state,
+        account_type="TFSA",
+        sub_portfolio="growth",
+        capital=200.0,
+        target_rows=[{"ticker": "NVDA", "allocation": 500.0, "quantity": 2}],
+    )
+    assert [a for a in plan["actions"] if str(a.get("action", "")).upper() in {"BUY", "BUY_MORE"}] == []
+    assert [a for a in plan["actions"] if str(a.get("action", "")).upper() == "SWAP"] == []
+
+
+def test_rebalance_reduces_standalone_sell_after_swap_funding():
+    state = {
+        "positions": [
+            {
+                "ticker": "AAPL",
+                "account_type": "TFSA",
+                "sub_portfolio": "growth",
+                "status": "EXIT",
+                "entry_price": 50.0,
+                "quantity": 10,
+                "entry_composite_score": 55.0,
+                "last_review_score": 40.0,
+                "metadata": {},
+            }
+        ]
+    }
+    plan = _rebalance_actions_for_account(
+        state=state,
+        account_type="TFSA",
+        sub_portfolio="growth",
+        capital=550.0,
+        target_rows=[{"ticker": "MSFT", "allocation": 500.0, "quantity": 4}],
+    )
+    swap_rows = [a for a in plan["actions"] if a.get("action") == "SWAP"]
+    sell_rows = [a for a in plan["actions"] if a.get("action") == "SELL" and a.get("ticker") == "AAPL"]
+    assert len(swap_rows) == 1
+    assert len(sell_rows) == 1
+    assert float(sell_rows[0]["delta"]) == -50.0

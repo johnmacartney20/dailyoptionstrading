@@ -1248,7 +1248,6 @@ def _select_funding_sell(
             0 if str(c.get("status", "")).upper().startswith("EXIT") else 1,
             float(c.get("score", float("inf"))),
             0 if _is_correlated_holding(str(c.get("ticker", "")), buy_ticker) else 1,
-            float(c.get("score", float("inf"))),
             float(c.get("remaining_value", 0.0)),
         ),
     )
@@ -1395,6 +1394,7 @@ def _rebalance_actions_for_account(
         )
 
     constrained_actions: list[dict] = []
+    funding_by_ticker: dict[str, dict[str, float]] = {}
     for action in actions:
         act = str(action.get("action", "")).upper()
         if act not in {"BUY", "BUY_MORE"}:
@@ -1423,6 +1423,10 @@ def _rebalance_actions_for_account(
         available_cash = max(available_cash + capital_freed - required, 0.0)
         sell_choice["remaining_qty"] = max(int(sell_choice["remaining_qty"]) - sell_qty, 0)
         sell_choice["remaining_value"] = max(float(sell_choice["remaining_value"]) - capital_freed, 0.0)
+        ticker_key = str(sell_choice["ticker"]).upper()
+        used = funding_by_ticker.setdefault(ticker_key, {"value": 0.0, "qty": 0.0})
+        used["value"] += float(capital_freed)
+        used["qty"] += float(sell_qty)
 
         constrained_actions.append(
             {
@@ -1437,6 +1441,38 @@ def _rebalance_actions_for_account(
                 "reason": "capital-constrained buy linked to funding sell",
             }
         )
+
+    if funding_by_ticker:
+        adjusted_actions: list[dict] = []
+        for action in constrained_actions:
+            act = str(action.get("action", "")).upper()
+            ticker = str(action.get("ticker", "")).upper()
+            used = funding_by_ticker.get(ticker)
+            if act not in {"SELL", "TRIM"} or not used:
+                adjusted_actions.append(action)
+                continue
+
+            current_val = max(float(action.get("current", 0.0) or 0.0), 0.0)
+            delta_val = float(action.get("delta", 0.0) or 0.0)
+            sell_amount = max(-delta_val, 0.0)
+            applied_value = min(float(used["value"]), sell_amount)
+            remaining_sell = max(sell_amount - applied_value, 0.0)
+            if remaining_sell <= 0.0:
+                used["value"] = max(float(used["value"]) - applied_value, 0.0)
+                continue
+
+            qty = int(float(action.get("quantity", 0) or 0))
+            per_unit = (current_val / qty) if qty > 0 and current_val > 0 else 0.0
+            reduced_qty = int(math.ceil(applied_value / per_unit)) if per_unit > 0 else 0
+            new_qty = max(qty - reduced_qty, 0)
+            used["value"] = max(float(used["value"]) - applied_value, 0.0)
+            used["qty"] = max(float(used["qty"]) - float(reduced_qty), 0.0)
+
+            action["delta"] = -remaining_sell
+            action["quantity"] = new_qty
+            action["reason"] = f"{action.get('reason', '')}; adjusted after swap funding".strip("; ")
+            adjusted_actions.append(action)
+        constrained_actions = adjusted_actions
 
     actions = constrained_actions
     target_total = sum(target_map.values())
