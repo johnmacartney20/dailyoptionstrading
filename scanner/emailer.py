@@ -179,8 +179,8 @@ def _combined_allocation_rows(
             rows.append(
                 {
                     "ticker": item.ticker,
-                    "account": "OPTIONS",
-                    "action": "Buy stock",
+                    "account": getattr(item, "account", "OPTIONS"),
+                    "action": getattr(item, "action", "Buy stock"),
                     "allocation_pct": item.pct_of_portfolio,
                     "allocation": item.allocation,
                 }
@@ -215,8 +215,8 @@ def _combined_allocation_rows(
             rows.append(
                 {
                     "ticker": item.ticker,
-                    "account": "FHSA",
-                    "action": "Buy stock",
+                    "account": getattr(item, "account", "FHSA"),
+                    "action": getattr(item, "action", "Buy stock"),
                     "allocation_pct": item.pct_of_portfolio,
                     "allocation": item.allocation,
                 }
@@ -244,10 +244,10 @@ def _combined_allocation_table_html(rows: List[Dict[str, Any]]) -> str:
     display["Allocation %"] = display["Allocation %"].map(lambda value: f"{value:.1f}%")
     display["Allocation $"] = display["Allocation $"].map(lambda value: f"${value:,.2f}")
 
-    headers = "".join(f"<th>{heading}</th>" for heading in display.columns)
+    headers = "".join(f"<th>{escape(str(heading))}</th>" for heading in display.columns)
     rows_html = ""
     for _, row in display.iterrows():
-        rows_html += "<tr>" + "".join(f"<td>{value}</td>" for value in row) + "</tr>"
+        rows_html += "<tr>" + "".join(f"<td>{escape(str(value))}</td>" for value in row) + "</tr>"
 
     return f'<table class="compact-table"><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table>'
 
@@ -330,10 +330,10 @@ def _collapsed_holdings_review_html(
         if column in display.columns:
             display[column] = pd.to_numeric(display[column], errors="coerce").fillna(0.0).round(2)
 
-    headers = "".join(f"<th>{heading}</th>" for heading in display.columns)
+    headers = "".join(f"<th>{escape(str(heading))}</th>" for heading in display.columns)
     rows_html = ""
     for _, row in display.iterrows():
-        rows_html += "<tr>" + "".join(f"<td>{value}</td>" for value in row) + "</tr>"
+        rows_html += "<tr>" + "".join(f"<td>{escape(str(value))}</td>" for value in row) + "</tr>"
 
     body += (
         f"<p class='compact-note'>EXIT: {exit_count} | FLAG: {flag_count} | "
@@ -356,12 +356,18 @@ def _rebalance_actions_html(rebalance_plan: Optional[List[Dict[str, Any]]]) -> s
             if act == "KEEP":
                 continue
             if act == "SWAP":
+                sell_ticker = str(action.get("sell_ticker", ""))
+                buy_ticker = str(action.get("buy_ticker", ""))
+                if sell_ticker and buy_ticker:
+                    ticker_label = f"{sell_ticker} → {buy_ticker}"
+                else:
+                    ticker_label = sell_ticker or buy_ticker
                 rows.append(
                     {
                         "Account": account,
                         "Sleeve": sleeve,
                         "Action": "SWAP",
-                        "Ticker": f"{action.get('sell_ticker', '')} → {action.get('buy_ticker', '')}",
+                        "Ticker": ticker_label,
                         "Capital $": f"${float(action.get('capital_required', 0.0) or 0.0):,.2f}",
                         "Reason": str(action.get("reason", "")),
                     }
@@ -374,7 +380,7 @@ def _rebalance_actions_html(rebalance_plan: Optional[List[Dict[str, Any]]]) -> s
                     "Sleeve": sleeve,
                     "Action": act,
                     "Ticker": str(action.get("ticker", "")),
-                    "Capital $": f"${abs(float(action.get('delta', 0.0) or 0.0)):,.2f}",
+                    "Capital $": f"${float(action.get('delta', 0.0) or 0.0):+,.2f}",
                     "Reason": str(action.get("reason", "")),
                 }
             )
@@ -383,7 +389,7 @@ def _rebalance_actions_html(rebalance_plan: Optional[List[Dict[str, Any]]]) -> s
         return "<p>No sell, trim, or buy changes needed versus current holdings.</p>"
 
     display = pd.DataFrame(rows)[["Account", "Sleeve", "Action", "Ticker", "Capital $", "Reason"]]
-    headers = "".join(f"<th>{heading}</th>" for heading in display.columns)
+    headers = "".join(f"<th>{escape(str(heading))}</th>" for heading in display.columns)
     rows_html = ""
     for _, row in display.iterrows():
         rows_html += "<tr>" + "".join(f"<td>{escape(str(value))}</td>" for value in row) + "</tr>"

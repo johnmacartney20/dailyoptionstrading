@@ -201,3 +201,43 @@ def test_daily_email_reports_degraded_options_feed_when_no_suggestions():
     assert "Top Options Watchlist" in html
     assert "No qualifying options met filters today, and the feed looked degraded" in html
     assert "18/24 eligible option chains had mostly zero bids" in html
+
+
+def test_daily_email_rebalance_actions_handles_sell_keep_and_empty_states():
+    sell_html = build_html_email(
+        suggestions=pd.DataFrame(),
+        exchange="all",
+        rebalance_plan=[
+            {
+                "account": "TFSA",
+                "sub_portfolio": "growth",
+                "actions": [
+                    {"action": "SELL", "ticker": "NVDA", "delta": -500.0, "reason": "not in target portfolio"}
+                ],
+            }
+        ],
+    )
+    keep_only_html = build_html_email(
+        suggestions=pd.DataFrame(),
+        exchange="all",
+        rebalance_plan=[
+            {
+                "account": "TFSA",
+                "sub_portfolio": "growth",
+                "actions": [
+                    {"action": "KEEP", "ticker": "NVDA", "delta": 0.0, "reason": "within rebalance band"}
+                ],
+            }
+        ],
+    )
+    empty_html = build_html_email(
+        suggestions=pd.DataFrame(),
+        exchange="all",
+        rebalance_plan=[],
+    )
+
+    assert "SELL" in sell_html
+    assert "NVDA" in sell_html
+    assert "$-500.00" in sell_html
+    assert "No sell, trim, or buy changes needed versus current holdings." in keep_only_html
+    assert "No rebalance actions generated today." in empty_html
