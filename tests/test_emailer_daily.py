@@ -80,14 +80,31 @@ def test_daily_email_prioritizes_actions_and_groups_rejections():
         ]
     )
     portfolio = SimpleNamespace(selected=[_make_portfolio_item(ticker="SPY")])
+    options_stock = SimpleNamespace(selected=[_make_portfolio_item(ticker="SHOP", account="OPTIONS", action="Buy stock", current_price=150.0, composite_score=86.0, allocation=250.0, pct_of_portfolio=25.0)])
     tfsa_allocation = SimpleNamespace(selected=[_make_portfolio_item(ticker="AAPL", strategy_type="Buy long call", buy_strike=105.0, tfsa_score=93.5, allocation=300.0, pct_of_portfolio=30.0)])
     tfsa_stock = SimpleNamespace(selected=[_make_portfolio_item(ticker="MFC.TO", account="TFSA", action="Buy stock", current_price=57.05, composite_score=87.5, allocation=450.0, pct_of_portfolio=45.0)])
     rrsp = SimpleNamespace(selected=[_make_portfolio_item(ticker="RY.TO", account="RRSP", action="Buy stock", current_price=288.41, composite_score=95.0, allocation=500.0, pct_of_portfolio=50.0)])
+    fhsa_stock = SimpleNamespace(selected=[_make_portfolio_item(ticker="ATD.TO", account="FHSA", action="Buy stock", current_price=82.0, composite_score=84.0, allocation=400.0, pct_of_portfolio=40.0)])
     rejected_candidates = [
         {"ticker": "NVDA", "score": 90.0, "reason": "duplicate ticker"},
         {"ticker": "NVDA", "score": 89.0, "reason": "duplicate ticker"},
         {"ticker": "NVDA", "score": 88.0, "reason": "no available slots"},
         {"ticker": "AVGO", "score": 87.0, "reason": "duplicate ticker"},
+    ]
+    rebalance_plan = [
+        {
+            "account": "TFSA",
+            "sub_portfolio": "growth",
+            "actions": [
+                {
+                    "action": "SWAP",
+                    "sell_ticker": "NVDA",
+                    "buy_ticker": "MFC.TO",
+                    "capital_required": 450.0,
+                    "reason": "capital-constrained buy linked to funding sell",
+                }
+            ],
+        }
     ]
 
     html = build_html_email(
@@ -95,12 +112,15 @@ def test_daily_email_prioritizes_actions_and_groups_rejections():
         exchange="tsx",
         top=5,
         portfolio=portfolio,
+        options_stock=options_stock,
         tfsa_allocation=tfsa_allocation,
         tfsa_stock=tfsa_stock,
         rrsp=rrsp,
+        fhsa_stock=fhsa_stock,
         holdings_review=holdings_review,
         portfolio_state_summary={"total_positions": 3, "by_status": {"HOLD": 2, "FLAG": 0, "EXIT": 1}},
         rejected_candidates=rejected_candidates,
+        rebalance_plan=rebalance_plan,
     )
 
     assert "Action Summary" in html
@@ -108,10 +128,14 @@ def test_daily_email_prioritizes_actions_and_groups_rejections():
     assert "<details><summary><strong>Holdings Review</strong></summary>" in html
     assert "1 actionable review(s) from 3 holdings" in html
     assert "NVDA" in html and "EXIT" in html
-    assert "New trades entered: <strong>4</strong>" in html
+    assert "New trades entered: <strong>6</strong>" in html
     assert "Model Holdings Snapshot" not in html
     assert "NVDA" in html and "2" in html
     assert "Portfolio Actions" in html
+    assert "Rebalance Actions" in html
+    assert "NVDA → MFC.TO" in html
+    assert "FHSA 1" in html
+    assert "OPTIONS 2" in html
     assert "Top Options Watchlist" in html
     assert "<details><summary><strong>Top Options Watchlist</strong></summary>" in html
 
@@ -177,3 +201,43 @@ def test_daily_email_reports_degraded_options_feed_when_no_suggestions():
     assert "Top Options Watchlist" in html
     assert "No qualifying options met filters today, and the feed looked degraded" in html
     assert "18/24 eligible option chains had mostly zero bids" in html
+
+
+def test_daily_email_rebalance_actions_handles_sell_keep_and_empty_states():
+    sell_html = build_html_email(
+        suggestions=pd.DataFrame(),
+        exchange="all",
+        rebalance_plan=[
+            {
+                "account": "TFSA",
+                "sub_portfolio": "growth",
+                "actions": [
+                    {"action": "SELL", "ticker": "NVDA", "delta": -500.0, "reason": "not in target portfolio"}
+                ],
+            }
+        ],
+    )
+    keep_only_html = build_html_email(
+        suggestions=pd.DataFrame(),
+        exchange="all",
+        rebalance_plan=[
+            {
+                "account": "TFSA",
+                "sub_portfolio": "growth",
+                "actions": [
+                    {"action": "KEEP", "ticker": "NVDA", "delta": 0.0, "reason": "within rebalance band"}
+                ],
+            }
+        ],
+    )
+    empty_html = build_html_email(
+        suggestions=pd.DataFrame(),
+        exchange="all",
+        rebalance_plan=[],
+    )
+
+    assert "SELL" in sell_html
+    assert "NVDA" in sell_html
+    assert "$-500.00" in sell_html
+    assert "No sell, trim, or buy changes needed versus current holdings." in keep_only_html
+    assert "No rebalance actions generated today." in empty_html
