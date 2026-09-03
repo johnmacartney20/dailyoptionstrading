@@ -97,6 +97,12 @@ def test_daily_email_prioritizes_actions_and_groups_rejections():
             "sub_portfolio": "growth",
             "actions": [
                 {
+                    "action": "KEEP",
+                    "ticker": "MSFT",
+                    "delta": 0.0,
+                    "reason": "within rebalance band",
+                },
+                {
                     "action": "SWAP",
                     "sell_ticker": "NVDA",
                     "buy_ticker": "MFC.TO",
@@ -127,15 +133,17 @@ def test_daily_email_prioritizes_actions_and_groups_rejections():
     assert html.index("Action Summary") < html.index("Holdings Review")
     assert "<details><summary><strong>Holdings Review</strong></summary>" in html
     assert "1 actionable review(s) from 3 holdings" in html
+    assert "Based on yesterday&apos;s positions: <strong>1</strong> keep, <strong>1</strong> move on from, <strong>1</strong> enter/add today." in html
+    assert "Yesterday" in html and "Today" in html and "Decision" in html
+    assert "MSFT" in html and "KEEP" in html
     assert "NVDA" in html and "EXIT" in html
     assert "New trades entered: <strong>6</strong>" in html
     assert "Model Holdings Snapshot" not in html
     assert "NVDA" in html and "2" in html
-    assert "Portfolio Actions" in html
+    assert "Portfolio Actions" not in html
     assert "Rebalance Actions" in html
-    assert "NVDA → MFC.TO" in html
-    assert "FHSA 1" in html
-    assert "OPTIONS 2" in html
+    assert "MOVE ON + ENTER" in html
+    assert "MFC.TO" in html
     assert "Top Options Watchlist" in html
     assert "<details><summary><strong>Top Options Watchlist</strong></summary>" in html
 
@@ -236,8 +244,9 @@ def test_daily_email_rebalance_actions_handles_sell_keep_and_empty_states():
         rebalance_plan=[],
     )
 
-    assert "SELL" in sell_html
+    assert "MOVE ON" in sell_html
     assert "NVDA" in sell_html
     assert "$-500.00" in sell_html
+    assert "Yesterday" in sell_html and "Today" in sell_html and "Decision" in sell_html
     assert "No sell, trim, or buy changes needed versus current holdings." in keep_only_html
     assert "No rebalance actions generated today." in empty_html

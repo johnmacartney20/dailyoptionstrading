@@ -343,52 +343,71 @@ def _collapsed_holdings_review_html(
     return body
 
 
-def _rebalance_actions_html(rebalance_plan: Optional[List[Dict[str, Any]]]) -> str:
+def _rebalance_action_rows(
+    rebalance_plan: Optional[List[Dict[str, Any]]],
+    *,
+    include_keep: bool,
+) -> List[Dict[str, str]]:
     if not rebalance_plan:
-        return "<p>No rebalance actions generated today.</p>"
+        return []
 
-    rows: List[Dict[str, Any]] = []
+    rows: List[Dict[str, str]] = []
     for account_plan in rebalance_plan:
         account = str(account_plan.get("account", ""))
         sleeve = str(account_plan.get("sub_portfolio", ""))
         for action in account_plan.get("actions", []) or []:
             act = str(action.get("action", "")).upper()
-            if act == "KEEP":
+            if act == "KEEP" and not include_keep:
                 continue
             if act == "SWAP":
-                sell_ticker = str(action.get("sell_ticker", ""))
-                buy_ticker = str(action.get("buy_ticker", ""))
-                if sell_ticker and buy_ticker:
-                    ticker_label = f"{sell_ticker} → {buy_ticker}"
-                else:
-                    ticker_label = sell_ticker or buy_ticker
                 rows.append(
                     {
                         "Account": account,
                         "Sleeve": sleeve,
-                        "Action": "SWAP",
-                        "Ticker": ticker_label,
+                        "Yesterday": str(action.get("sell_ticker", "")),
+                        "Today": str(action.get("buy_ticker", "")),
+                        "Decision": "MOVE ON + ENTER",
                         "Capital $": f"${float(action.get('capital_required', 0.0) or 0.0):,.2f}",
                         "Reason": str(action.get("reason", "")),
                     }
                 )
                 continue
 
+            ticker = str(action.get("ticker", ""))
+            decision = {
+                "KEEP": "KEEP",
+                "SELL": "MOVE ON",
+                "TRIM": "KEEP + TRIM",
+                "BUY": "ENTER",
+                "BUY_MORE": "KEEP + ADD",
+            }.get(act, act)
+            today_ticker = "" if act == "SELL" else ticker
             rows.append(
                 {
                     "Account": account,
                     "Sleeve": sleeve,
-                    "Action": act,
-                    "Ticker": str(action.get("ticker", "")),
+                    "Yesterday": ticker if act != "BUY" else "",
+                    "Today": today_ticker,
+                    "Decision": decision,
                     "Capital $": f"${float(action.get('delta', 0.0) or 0.0):+,.2f}",
                     "Reason": str(action.get("reason", "")),
                 }
             )
+    return rows
 
+
+def _rebalance_actions_html(rebalance_plan: Optional[List[Dict[str, Any]]]) -> str:
+    rows = _rebalance_action_rows(rebalance_plan, include_keep=False)
+    if rebalance_plan is None:
+        return "<p>No rebalance actions generated today.</p>"
+    if not rebalance_plan:
+        return "<p>No rebalance actions generated today.</p>"
     if not rows:
         return "<p>No sell, trim, or buy changes needed versus current holdings.</p>"
 
-    display = pd.DataFrame(rows)[["Account", "Sleeve", "Action", "Ticker", "Capital $", "Reason"]]
+    display = pd.DataFrame(rows)[["Account", "Sleeve", "Yesterday", "Today", "Decision", "Capital $", "Reason"]].copy()
+    display["Yesterday"] = display["Yesterday"].replace("", "—")
+    display["Today"] = display["Today"].replace("", "—")
     headers = "".join(f"<th>{escape(str(heading))}</th>" for heading in display.columns)
     rows_html = ""
     for _, row in display.iterrows():
@@ -417,6 +436,7 @@ def _render_daily_action_summary(
     tfsa_stock: Optional[TfsaStockPortfolio],
     rrsp: Optional[RrspPortfolio],
     fhsa_stock: Optional[TfsaStockPortfolio],
+    rebalance_plan: Optional[List[Dict[str, Any]]] = None,
     entered_trades_count: Optional[int] = None,
 ) -> str:
     review_df = holdings_review.copy() if holdings_review is not None else pd.DataFrame()
@@ -449,8 +469,11 @@ def _render_daily_action_summary(
         rrsp,
         fhsa_stock,
     )
+    action_rows = _rebalance_action_rows(rebalance_plan, include_keep=True)
+    keep_count = sum(1 for row in action_rows if row.get("Decision") == "KEEP")
+    move_on_count = sum(1 for row in action_rows if "MOVE ON" in str(row.get("Decision", "")))
+    enter_count = sum(1 for row in action_rows if "ENTER" in str(row.get("Decision", "")) or "ADD" in str(row.get("Decision", "")))
     new_trades = int(entered_trades_count) if entered_trades_count is not None else len(allocation_rows)
-    trade_breakdown = _allocation_breakdown(allocation_rows)
     html = '<div class="daily-action">'
     html += '<h2>Action Summary</h2>'
 
@@ -472,10 +495,22 @@ def _render_daily_action_summary(
                 html += "</li>"
             html += "</ul>"
 
-    html += f'<p class="action-line">New trades entered: <strong>{new_trades}</strong>'
-    if trade_breakdown:
-        html += f" <span class='compact-note'>({trade_breakdown})</span>"
-    html += "</p>"
+    if action_rows:
+        html += (
+            f'<p class="action-line">Based on yesterday&apos;s positions: '
+            f'<strong>{keep_count}</strong> keep, <strong>{move_on_count}</strong> move on from, '
+            f'<strong>{enter_count}</strong> enter/add today.</p>'
+        )
+        summary_display = pd.DataFrame(action_rows)[["Account", "Sleeve", "Yesterday", "Today", "Decision", "Capital $", "Reason"]].copy()
+        summary_display["Yesterday"] = summary_display["Yesterday"].replace("", "—")
+        summary_display["Today"] = summary_display["Today"].replace("", "—")
+        headers = "".join(f"<th>{escape(str(heading))}</th>" for heading in summary_display.columns)
+        rows_html = ""
+        for _, row in summary_display.iterrows():
+            rows_html += "<tr>" + "".join(f"<td>{escape(str(value))}</td>" for value in row) + "</tr>"
+        html += f'<table class="compact-table"><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table>'
+
+    html += f'<p class="action-line">New trades entered: <strong>{new_trades}</strong></p>'
     html += "</div>"
     return html
 
@@ -1339,6 +1374,7 @@ def build_html_email(
         tfsa_stock=tfsa_stock,
         rrsp=rrsp,
         fhsa_stock=fhsa_stock,
+        rebalance_plan=rebalance_plan,
         entered_trades_count=entered_trades_count,
     )
 
@@ -1349,21 +1385,6 @@ def build_html_email(
         )
         html += _visible_section("Holdings Review", holdings_body)
 
-    allocation_rows = _combined_allocation_rows(
-        portfolio,
-        options_stock,
-        tfsa_allocation,
-        tfsa_stock,
-        rrsp,
-        fhsa_stock,
-    )
-    html += _visible_section(
-        "Portfolio Actions",
-        (
-            "<p class='compact-note'>Ticker, account, action, and allocation percent are grouped into one table.</p>"
-            + _combined_allocation_table_html(allocation_rows)
-        ),
-    )
     html += _visible_section("Rebalance Actions", _rebalance_actions_html(rebalance_plan))
 
     if suggestions is not None and not suggestions.empty and "option_type" in suggestions.columns:
