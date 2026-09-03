@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from main import _available_account_cash, _record_new_entries, scan_ticker
+from main import _available_account_cash, _rebalance_actions_for_account, _record_new_entries, scan_ticker
 from scanner.risk import add_position_sizing_columns, filter_unaffordable_trades
 from scanner.portfolio_allocator import (
     PortfolioAllocation,
@@ -317,3 +317,125 @@ def test_scan_ticker_returns_empty_diagnostics_when_price_missing(monkeypatch):
 
     assert frames == []
     assert diagnostics == {"eligible_expiries": 0, "chains_checked": 0, "stale_chains": 0}
+
+
+def test_rebalance_links_unfunded_buy_to_swap_with_exit_holding():
+    state = {
+        "positions": [
+            {
+                "ticker": "AAPL",
+                "account_type": "TFSA",
+                "sub_portfolio": "growth",
+                "status": "EXIT",
+                "entry_price": 50.0,
+                "quantity": 10,
+                "entry_composite_score": 75.0,
+                "last_review_score": 40.0,
+                "metadata": {},
+            },
+            {
+                "ticker": "MSFT",
+                "account_type": "TFSA",
+                "sub_portfolio": "growth",
+                "status": "HOLD",
+                "entry_price": 40.0,
+                "quantity": 10,
+                "entry_composite_score": 80.0,
+                "last_review_score": 78.0,
+                "metadata": {},
+            },
+        ]
+    }
+    plan = _rebalance_actions_for_account(
+        state=state,
+        account_type="TFSA",
+        sub_portfolio="growth",
+        capital=1000.0,
+        target_rows=[{"ticker": "NVDA", "allocation": 500.0, "quantity": 5}],
+    )
+    swap_rows = [a for a in plan["actions"] if a.get("action") == "SWAP"]
+    assert len(swap_rows) == 1
+    assert swap_rows[0]["sell_ticker"] == "AAPL"
+    assert swap_rows[0]["buy_ticker"] == "NVDA"
+    assert all(
+        str(a.get("action", "")).upper() not in {"BUY", "BUY_MORE"}
+        for a in plan["actions"]
+    )
+
+
+def test_rebalance_prefers_weakest_holding_when_no_exit_available():
+    state = {
+        "positions": [
+            {
+                "ticker": "AAPL",
+                "account_type": "TFSA",
+                "sub_portfolio": "growth",
+                "status": "HOLD",
+                "entry_price": 100.0,
+                "quantity": 10,
+                "entry_composite_score": 85.0,
+                "last_review_score": 85.0,
+                "metadata": {},
+            },
+            {
+                "ticker": "MSFT",
+                "account_type": "TFSA",
+                "sub_portfolio": "growth",
+                "status": "HOLD",
+                "entry_price": 100.0,
+                "quantity": 10,
+                "entry_composite_score": 55.0,
+                "last_review_score": 55.0,
+                "metadata": {},
+            },
+        ]
+    }
+    plan = _rebalance_actions_for_account(
+        state=state,
+        account_type="TFSA",
+        sub_portfolio="growth",
+        capital=2100.0,
+        target_rows=[{"ticker": "NVDA", "allocation": 300.0, "quantity": 2}],
+    )
+    swap_rows = [a for a in plan["actions"] if a.get("action") == "SWAP"]
+    assert len(swap_rows) == 1
+    assert swap_rows[0]["sell_ticker"] == "MSFT"
+
+
+def test_rebalance_breaks_ties_with_correlation():
+    state = {
+        "positions": [
+            {
+                "ticker": "AAPL",
+                "account_type": "TFSA",
+                "sub_portfolio": "growth",
+                "status": "HOLD",
+                "entry_price": 100.0,
+                "quantity": 10,
+                "entry_composite_score": 60.0,
+                "last_review_score": 60.0,
+                "metadata": {},
+            },
+            {
+                "ticker": "COST",
+                "account_type": "TFSA",
+                "sub_portfolio": "growth",
+                "status": "HOLD",
+                "entry_price": 100.0,
+                "quantity": 10,
+                "entry_composite_score": 60.0,
+                "last_review_score": 60.0,
+                "metadata": {},
+            },
+        ]
+    }
+    plan = _rebalance_actions_for_account(
+        state=state,
+        account_type="TFSA",
+        sub_portfolio="growth",
+        capital=2050.0,
+        target_rows=[{"ticker": "MSFT", "allocation": 200.0, "quantity": 1}],
+    )
+    swap_rows = [a for a in plan["actions"] if a.get("action") == "SWAP"]
+    assert len(swap_rows) == 1
+    assert swap_rows[0]["sell_ticker"] == "AAPL"
