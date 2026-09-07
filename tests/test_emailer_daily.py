@@ -1,5 +1,6 @@
 """Tests for the daily email layout."""
 
+from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pandas as pd
@@ -251,3 +252,59 @@ def test_daily_email_action_summary_handles_rebalance_states_without_extra_secti
     assert "Rebalance Actions" not in sell_html
     assert "Rebalance Actions" not in keep_only_html
     assert "Rebalance Actions" not in empty_html
+
+
+def test_daily_email_renders_current_holdings_summary_from_portfolio_state():
+    today = date.today()
+    portfolio_state = {
+        "positions": [
+            {"ticker": "SPY", "account_type": "OPTIONS", "sub_portfolio": "put-spread", "entry_date": (today - timedelta(days=2)).isoformat(), "status": "HOLD", "metadata": {}},
+            {"ticker": "QQQ", "account_type": "OPTIONS", "sub_portfolio": "growth", "entry_date": (today - timedelta(days=1)).isoformat(), "status": "FLAG", "metadata": {}},
+            {"ticker": "MFC.TO", "account_type": "TFSA", "sub_portfolio": "growth", "entry_date": (today - timedelta(days=3)).isoformat(), "status": "HOLD", "metadata": {}},
+            {"ticker": "RY.TO", "account_type": "RRSP", "sub_portfolio": "stability", "entry_date": (today - timedelta(days=20)).isoformat(), "status": "HOLD", "metadata": {}},
+            {"ticker": "ATD.TO", "account_type": "FHSA", "sub_portfolio": "growth", "entry_date": (today - timedelta(days=5)).isoformat(), "status": "HOLD", "metadata": {}},
+            {"ticker": "CASH.TO", "account_type": "TFSA", "sub_portfolio": "cash", "entry_date": (today - timedelta(days=1)).isoformat(), "status": "HOLD", "metadata": {"is_cash": True}},
+            {"ticker": "OLD.TO", "account_type": "TFSA", "sub_portfolio": "growth", "entry_date": (today - timedelta(days=12)).isoformat(), "status": "EXIT", "metadata": {}},
+        ]
+    }
+    min_hold_days = {"put_spread": 1, "growth": 7, "stability": 15, "long_call": 7}
+
+    html = build_html_email(
+        suggestions=pd.DataFrame(),
+        exchange="all",
+        portfolio_state=portfolio_state,
+        min_hold_days_by_sleeve=min_hold_days,
+    )
+
+    assert "CURRENT HOLDINGS —" in html
+    assert html.index("CURRENT HOLDINGS —") < html.index("Action Summary")
+    assert "OPTIONS" in html and "TFSA" in html and "RRSP" in html and "FHSA" in html
+    assert "SPY (2d held)" in html
+    assert "QQQ (1d held; MIN-HOLD 1/7d; FLAG)" in html
+    assert "MFC.TO (3d held; MIN-HOLD 3/7d)" in html
+    assert "RY.TO (20d held)" in html
+    assert "ATD.TO (5d held; MIN-HOLD 5/7d)" in html
+    assert "CASH.TO" not in html
+    assert "OLD.TO" not in html
+
+
+def test_daily_email_omits_empty_accounts_in_current_holdings_summary():
+    today = date.today()
+    portfolio_state = {
+        "positions": [
+            {"ticker": "MFC.TO", "account_type": "TFSA", "sub_portfolio": "growth", "entry_date": (today - timedelta(days=9)).isoformat(), "status": "HOLD", "metadata": {}},
+        ]
+    }
+
+    html = build_html_email(
+        suggestions=pd.DataFrame(),
+        exchange="all",
+        portfolio_state=portfolio_state,
+        min_hold_days_by_sleeve={"growth": 7},
+    )
+
+    assert "CURRENT HOLDINGS —" in html
+    assert "TFSA" in html
+    assert "OPTIONS" not in html
+    assert "RRSP" not in html
+    assert "FHSA" not in html

@@ -16,7 +16,7 @@ import logging
 import os
 import smtplib
 from collections import Counter
-from datetime import date
+from datetime import date, datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from html import escape
@@ -418,6 +418,98 @@ def _render_daily_action_summary(
         html += f'<table class="compact-table"><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table>'
 
     html += f'<p class="action-line">New trades entered: <strong>{new_trades}</strong></p>'
+    html += "</div>"
+    return html
+
+
+def _normalize_sleeve_key(sub_portfolio: str) -> str:
+    return str(sub_portfolio or "").strip().lower().replace("-", "_")
+
+
+def _min_hold_days_for_sleeve(sub_portfolio: str, min_hold_days_by_sleeve: Optional[Dict[str, Any]]) -> int:
+    min_hold_days = min_hold_days_by_sleeve or {}
+    if not isinstance(min_hold_days, dict):
+        return 0
+
+    sleeve_key = _normalize_sleeve_key(sub_portfolio)
+    if sleeve_key in min_hold_days:
+        try:
+            return max(int(min_hold_days.get(sleeve_key, 0) or 0), 0)
+        except (TypeError, ValueError):
+            return 0
+    if sleeve_key == "long_call" and "growth" in min_hold_days:
+        try:
+            return max(int(min_hold_days.get("growth", 0) or 0), 0)
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
+def _days_held_from_entry_date(entry_date: str) -> int:
+    if not entry_date:
+        return 0
+    try:
+        start = datetime.strptime(str(entry_date), "%Y-%m-%d").date()
+    except ValueError:
+        return 0
+    return max((date.today() - start).days, 0)
+
+
+def _render_current_holdings_summary(
+    portfolio_state: Optional[Dict[str, Any]],
+    min_hold_days_by_sleeve: Optional[Dict[str, Any]] = None,
+) -> str:
+    state = portfolio_state or {}
+    positions = state.get("positions", []) if isinstance(state, dict) else []
+    if not isinstance(positions, list):
+        return ""
+
+    grouped: Dict[str, Dict[str, List[str]]] = {}
+    for pos in positions:
+        if not isinstance(pos, dict):
+            continue
+        metadata = pos.get("metadata", {}) or {}
+        if bool(metadata.get("is_cash", False)):
+            continue
+        if str(pos.get("status", "HOLD")).upper() == "EXIT":
+            continue
+
+        account = str(pos.get("account_type", "")).upper()
+        if account not in {"OPTIONS", "TFSA", "RRSP", "FHSA"}:
+            continue
+        sleeve = str(pos.get("sub_portfolio", "")).strip().lower()
+        if not sleeve:
+            continue
+        ticker = str(pos.get("ticker", "")).strip().upper()
+        if not ticker:
+            continue
+
+        days_held = _days_held_from_entry_date(str(pos.get("entry_date", "")))
+        tags: List[str] = []
+        min_hold_days = _min_hold_days_for_sleeve(sleeve, min_hold_days_by_sleeve)
+        if min_hold_days > 0 and days_held < min_hold_days:
+            tags.append(f"MIN-HOLD {days_held}/{min_hold_days}d")
+        if str(pos.get("status", "HOLD")).upper() == "FLAG":
+            tags.append("FLAG")
+        tag_suffix = f"; {'; '.join(tags)}" if tags else ""
+        entry = f"{ticker} ({days_held}d held{tag_suffix})"
+
+        grouped.setdefault(account, {}).setdefault(sleeve, []).append(entry)
+
+    if not grouped:
+        return ""
+
+    today = date.today().strftime("%Y-%m-%d")
+    html = '<div class="port-box">'
+    html += f"<h2>CURRENT HOLDINGS — {today}</h2>"
+    for account in ["OPTIONS", "TFSA", "RRSP", "FHSA"]:
+        sleeves = grouped.get(account, {})
+        if not sleeves:
+            continue
+        html += f"<h3>{escape(account)}</h3>"
+        for sleeve in sorted(sleeves.keys()):
+            tickers = ", ".join(sorted(sleeves[sleeve]))
+            html += f"<p><strong>{escape(sleeve)}</strong>: {escape(tickers)}</p>"
     html += "</div>"
     return html
 
@@ -1186,6 +1278,8 @@ def build_html_email(
     fhsa_stock: Optional[TfsaStockPortfolio] = None,
     holdings_review: Optional[pd.DataFrame] = None,
     portfolio_state_summary: Optional[Dict[str, Any]] = None,
+    portfolio_state: Optional[Dict[str, Any]] = None,
+    min_hold_days_by_sleeve: Optional[Dict[str, Any]] = None,
     rejected_candidates: Optional[List[Dict[str, Any]]] = None,
     entered_trades_count: Optional[int] = None,
     scan_diagnostics: Optional[Dict[str, Any]] = None,
@@ -1194,6 +1288,10 @@ def build_html_email(
     """Return a complete HTML email string for the given *suggestions* DataFrame."""
     today = date.today().strftime("%Y-%m-%d")
     html = _HTML_HEAD.format(date=today, exchange=exchange.upper(), total=len(suggestions))
+    html += _render_current_holdings_summary(
+        portfolio_state=portfolio_state,
+        min_hold_days_by_sleeve=min_hold_days_by_sleeve,
+    )
 
     html += _render_daily_action_summary(
         holdings_review=holdings_review,
