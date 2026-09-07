@@ -382,11 +382,14 @@ def allocate_portfolio(
             continue
 
         if available_slots <= 0:
+            reason = "no available slots"
+            if not selected_rows and len(held) >= max_trades:
+                reason = "no available slots; existing holdings retained until review exit"
             result.rejected.append(
                 RejectedCandidate(
                     ticker,
                     row_score,
-                    "no available slots; existing holdings retained until review exit",
+                    reason,
                 )
             )
             continue
@@ -581,11 +584,14 @@ def allocate_tfsa_portfolio(
             continue
 
         if available_slots <= 0:
+            reason = "no available slots"
+            if not selected_rows and len(held) >= max_trades:
+                reason = "no available slots; existing holdings retained until review exit"
             result.rejected.append(
                 RejectedCandidate(
                     ticker,
                     row_score,
-                    "no available slots; existing holdings retained until review exit",
+                    reason,
                 )
             )
             continue
@@ -833,11 +839,14 @@ def allocate_tfsa_stock_portfolio(
             continue
 
         if available_slots <= 0:
+            reason = f"lower composite score – outside top-{max_positions} selection"
+            if not selected_items and len(held) >= max_positions:
+                reason = f"no open slots; existing holdings retained instead of re-ranking top-{max_positions}"
             result.rejected.append(
                 RejectedCandidate(
                     ticker,
                     score.composite,
-                    f"no open slots; existing holdings retained instead of re-ranking top-{max_positions}",
+                    reason,
                 )
             )
             continue
@@ -1034,11 +1043,14 @@ def allocate_fhsa_stock_portfolio(
             continue
 
         if available_slots <= 0:
+            reason = f"lower blended score – outside top-{max_positions} selection"
+            if not selected_items and len(held) >= max_positions:
+                reason = f"no open slots; existing holdings retained instead of re-ranking top-{max_positions}"
             result.rejected.append(
                 RejectedCandidate(
                     ticker,
                     composite,
-                    f"no open slots; existing holdings retained instead of re-ranking top-{max_positions}",
+                    reason,
                 )
             )
             continue
@@ -1247,11 +1259,14 @@ def allocate_rrsp_portfolio(
             continue
 
         if available_slots <= 0:
+            reason = f"lower stability score – outside top-{max_positions} selection"
+            if not selected_items and len(held) >= max_positions:
+                reason = f"no open slots; existing holdings retained instead of re-ranking top-{max_positions}"
             result.rejected.append(
                 RejectedCandidate(
                     ticker,
                     score.composite,
-                    f"no open slots; existing holdings retained instead of re-ranking top-{max_positions}",
+                    reason,
                 )
             )
             continue
