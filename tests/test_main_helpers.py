@@ -165,6 +165,55 @@ def test_record_new_entries_skips_non_finite_allocations_and_prices():
     assert [pos["ticker"] for pos in state["positions"]] == ["COST"]
 
 
+def test_record_new_entries_preserves_existing_hold_positions():
+    state = {
+        "positions": [
+            {
+                "ticker": "AAPL",
+                "account_type": "TFSA",
+                "sub_portfolio": "growth",
+                "entry_date": "2026-08-01",
+                "entry_price": 100.0,
+                "quantity": 5,
+                "entry_composite_score": 80.0,
+                "status": "HOLD",
+                "last_review_score": 78.0,
+                "review_history": [],
+                "metadata": {},
+            }
+        ]
+    }
+
+    tfsa_stock = TfsaStockPortfolio(
+        total_capital=1000.0,
+        selected=[
+            StockAllocation(
+                ticker="NVDA",
+                sector="Semiconductors",
+                current_price=200.0,
+                composite_score=88.0,
+                allocation=400.0,
+                pct_of_portfolio=40.0,
+                reasoning="strong trend",
+            )
+        ],
+    )
+
+    _record_new_entries(
+        state,
+        PortfolioAllocation(total_capital=1000.0),
+        TfsaStockPortfolio(total_capital=1000.0),
+        TfsaAllocation(total_capital=1000.0),
+        tfsa_stock,
+        RrspPortfolio(total_capital=1000.0),
+        TfsaStockPortfolio(total_capital=1000.0),
+    )
+
+    tickers = {(pos["account_type"], pos["sub_portfolio"], pos["ticker"]) for pos in state["positions"]}
+    assert ("TFSA", "growth", "AAPL") in tickers
+    assert ("TFSA", "growth", "NVDA") in tickers
+
+
 # ── Always-on per-contract sizing tests ──────────────────────────────────────
 
 def _make_options_suggestions(*dicts) -> pd.DataFrame:
@@ -398,8 +447,11 @@ def test_rebalance_prefers_weakest_holding_when_no_exit_available():
         target_rows=[{"ticker": "NVDA", "allocation": 300.0, "quantity": 2}],
     )
     swap_rows = [a for a in plan["actions"] if a.get("action") == "SWAP"]
-    assert len(swap_rows) == 1
-    assert swap_rows[0]["sell_ticker"] == "MSFT"
+    keep_rows = [a for a in plan["actions"] if a.get("action") == "KEEP"]
+    buy_rows = [a for a in plan["actions"] if str(a.get("action", "")).upper() in {"BUY", "BUY_MORE"}]
+    assert swap_rows == []
+    assert buy_rows == []
+    assert {row["ticker"] for row in keep_rows} == {"AAPL", "MSFT"}
 
 
 def test_rebalance_breaks_ties_with_correlation():
@@ -409,7 +461,7 @@ def test_rebalance_breaks_ties_with_correlation():
                 "ticker": "AAPL",
                 "account_type": "TFSA",
                 "sub_portfolio": "growth",
-                "status": "HOLD",
+                "status": "EXIT",
                 "entry_price": 100.0,
                 "quantity": 10,
                 "entry_composite_score": 60.0,
@@ -420,7 +472,7 @@ def test_rebalance_breaks_ties_with_correlation():
                 "ticker": "COST",
                 "account_type": "TFSA",
                 "sub_portfolio": "growth",
-                "status": "HOLD",
+                "status": "EXIT",
                 "entry_price": 100.0,
                 "quantity": 10,
                 "entry_composite_score": 60.0,
@@ -439,6 +491,43 @@ def test_rebalance_breaks_ties_with_correlation():
     swap_rows = [a for a in plan["actions"] if a.get("action") == "SWAP"]
     assert len(swap_rows) == 1
     assert swap_rows[0]["sell_ticker"] == "AAPL"
+
+
+def test_rebalance_keeps_holdings_absent_from_target_portfolio():
+    state = {
+        "positions": [
+            {
+                "ticker": "MSFT",
+                "account_type": "TFSA",
+                "sub_portfolio": "growth",
+                "status": "HOLD",
+                "entry_price": 100.0,
+                "quantity": 10,
+                "entry_composite_score": 80.0,
+                "last_review_score": 78.0,
+                "metadata": {},
+            }
+        ]
+    }
+
+    plan = _rebalance_actions_for_account(
+        state=state,
+        account_type="TFSA",
+        sub_portfolio="growth",
+        capital=5000.0,
+        target_rows=[],
+    )
+
+    assert plan["actions"] == [
+        {
+            "action": "KEEP",
+            "ticker": "MSFT",
+            "current": 1000.0,
+            "target": 1000.0,
+            "delta": 0.0,
+            "reason": "within rebalance band",
+        }
+    ]
 
 
 def test_rebalance_drops_unfundable_buy_without_naked_suggestion():

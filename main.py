@@ -388,7 +388,7 @@ def _record_new_entries(
     rrsp: RrspPortfolio,
     fhsa_stock: TfsaStockPortfolio,
 ) -> None:
-    """Write newly selected positions into persistent state."""
+    """Write newly selected positions into persistent state without evicting live holdings."""
     def _safe_quantity(
         allocation: float,
         unit_cost: float,
@@ -419,27 +419,6 @@ def _record_new_entries(
             )
             return None
         return max(int(allocation_value // max(unit_cost_value, min_unit_cost)), 1)
-
-    managed_keys = {
-        ("OPTIONS", "put-spread"),
-        ("OPTIONS", "growth"),
-        ("TFSA", "long-call"),
-        ("TFSA", "growth"),
-        ("RRSP", "stability"),
-        ("FHSA", "growth"),
-    }
-    kept_positions = []
-    for pos in state.get("positions", []):
-        account = str(pos.get("account_type", "")).upper()
-        sub = str(pos.get("sub_portfolio", "")).lower()
-        metadata = pos.get("metadata", {}) or {}
-        if bool(metadata.get("is_cash", False)):
-            kept_positions.append(pos)
-            continue
-        if (account, sub) in managed_keys:
-            continue
-        kept_positions.append(pos)
-    state["positions"] = kept_positions
 
     for t in portfolio.selected:
         qty = _safe_quantity(
@@ -1273,13 +1252,20 @@ def _rebalance_actions_for_account(
     current_map: dict[str, float] = {}
     current_labels: dict[str, set[str]] = {}
     current_qty_map: dict[str, int] = {}
+    live_map: dict[str, float] = {}
+    live_qty_map: dict[str, int] = {}
     for p in current_positions:
         raw_ticker = str(p.get("ticker", "")).upper()
         key = _ticker_family_key(raw_ticker)
-        current_map[key] = current_map.get(key, 0.0) + _position_book_value(p)
+        position_value = _position_book_value(p)
+        current_map[key] = current_map.get(key, 0.0) + position_value
         current_labels.setdefault(key, set()).add(raw_ticker)
         qty = int(float(p.get("quantity", 0.0) or 0.0))
         current_qty_map[key] = current_qty_map.get(key, 0) + max(qty, 0)
+        status = str(p.get("status", "")).upper()
+        if status in {STATUS_HOLD, STATUS_FLAG}:
+            live_map[key] = live_map.get(key, 0.0) + position_value
+            live_qty_map[key] = live_qty_map.get(key, 0) + max(qty, 0)
 
     target_map: dict[str, float] = {}
     target_labels: dict[str, set[str]] = {}
@@ -1295,6 +1281,13 @@ def _rebalance_actions_for_account(
         except (TypeError, ValueError):
             qty_int = 0
         target_qty_map[key] = target_qty_map.get(key, 0) + max(qty_int, 0)
+
+    for key, live_value in live_map.items():
+        if float(target_map.get(key, 0.0) or 0.0) >= live_value:
+            continue
+        target_map[key] = live_value
+        target_labels.setdefault(key, set()).update(current_labels.get(key, set()))
+        target_qty_map[key] = max(target_qty_map.get(key, 0), live_qty_map.get(key, 0))
 
     actions: list[dict] = []
     all_keys = sorted(set(current_map) | set(target_map))
@@ -1379,6 +1372,9 @@ def _rebalance_actions_for_account(
     sell_pool: list[dict] = []
     for p in current_positions:
         ticker = str(p.get("ticker", "")).upper()
+        status = str(p.get("status", "")).upper()
+        if not status.startswith("EXIT"):
+            continue
         value = max(_position_book_value(p), 0.0)
         qty = max(int(float(p.get("quantity", 0.0) or 0.0)), 0)
         if value <= 0 or qty <= 0:
@@ -1386,7 +1382,7 @@ def _rebalance_actions_for_account(
         sell_pool.append(
             {
                 "ticker": ticker,
-                "status": str(p.get("status", "")).upper(),
+                "status": status,
                 "score": _position_conviction_score(p),
                 "remaining_value": value,
                 "remaining_qty": qty,
