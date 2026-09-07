@@ -205,6 +205,23 @@ def test_allocate_max_three_trades():
     assert result.num_open_trades <= 3
 
 
+def test_allocate_portfolio_retains_existing_holdings_when_full():
+    df = _make_suggestions(_make_put_row("NVDA", score=95.0, strike=450.0, spread_structure="Sell 450P / Buy 440P"))
+    result = allocate_portfolio(
+        df,
+        total_capital=1000.0,
+        max_trades=2,
+        existing_holdings=["AAPL", "MSFT"],
+        flagged_holdings_scores={"MSFT": 55.0},
+        displacement_margin=10.0,
+    )
+
+    assert result.selected == []
+    assert len(result.rejected) == 1
+    assert result.rejected[0].ticker == "NVDA"
+    assert "existing holdings retained until review exit" in result.rejected[0].reason
+
+
 def test_allocate_total_deployed():
     rows = [
         _make_put_row("AAPL", score=80.0),
@@ -258,6 +275,34 @@ def test_allocate_tfsa_stock_portfolio_skips_non_finite_scores(monkeypatch):
     assert isinstance(result, TfsaStockPortfolio)
     assert result.selected == []
     assert result.rejected == []
+
+
+def test_allocate_tfsa_stock_portfolio_retains_existing_holdings_when_full(monkeypatch):
+    hist = pd.DataFrame({"Close": [100.0, 110.0], "Volume": [1_000_000, 1_000_000]})
+
+    class MockScore:
+        def __init__(self, composite: float, reasoning: str) -> None:
+            self.composite = composite
+            self.reasoning = reasoning
+
+    monkeypatch.setattr(
+        "scanner.portfolio_allocator.score_stock_growth",
+        lambda hist, market_return_20d: MockScore(92.0, "strong trend"),
+    )
+
+    result = allocate_tfsa_stock_portfolio(
+        {"NVDA": hist},
+        total_capital=1000.0,
+        max_positions=3,
+        existing_holdings=["AAPL", "MSFT", "AMZN"],
+        flagged_holdings_scores={"AMZN": 60.0},
+        displacement_margin=10.0,
+    )
+
+    assert result.selected == []
+    assert len(result.rejected) == 1
+    assert result.rejected[0].ticker == "NVDA"
+    assert "existing holdings retained instead of re-ranking top-3" in result.rejected[0].reason
 
 
 def test_allocate_rrsp_portfolio_skips_non_finite_scores(monkeypatch):

@@ -1,5 +1,7 @@
 """Tests for holdings review lifecycle and consolidation policies."""
 
+from datetime import date, timedelta
+
 from scanner.holdings_reviewer import account_health_summary_lines, exited_capital_by_bucket, review_holdings
 
 
@@ -112,6 +114,135 @@ def test_review_holdings_non_finite_score_holds_with_explicit_reason(monkeypatch
     assert reviews[0].verdict == "HOLD"
     assert reviews[0].verdict_tag == "HOLD"
     assert "non-finite" in reviews[0].reason
+
+
+def test_review_holdings_min_hold_blocks_score_exit_for_growth_and_stability(monkeypatch):
+    monkeypatch.setattr(
+        "scanner.holdings_reviewer._score_position",
+        lambda pos, market_return_20d: (42.0, "mock"),
+    )
+
+    today = date.today()
+    positions = [
+        {
+            "ticker": "SHOP",
+            "account_type": "TFSA",
+            "sub_portfolio": "growth",
+            "entry_price": 100.0,
+            "quantity": 10,
+            "entry_composite_score": 70.0,
+            "entry_date": (today - timedelta(days=3)).isoformat(),
+            "review_history": [],
+            "metadata": {},
+        },
+        {
+            "ticker": "RY.TO",
+            "account_type": "RRSP",
+            "sub_portfolio": "stability",
+            "entry_price": 100.0,
+            "quantity": 10,
+            "entry_composite_score": 70.0,
+            "entry_date": (today - timedelta(days=10)).isoformat(),
+            "review_history": [],
+            "metadata": {},
+        },
+    ]
+
+    reviews = review_holdings(
+        positions,
+        thresholds={
+            "min_hold_days": {
+                "growth": 7,
+                "stability": 15,
+            }
+        },
+        market_return_20d=0.0,
+        account_capitals={"TFSA": 65_000.0, "RRSP": 24_000.0},
+    )
+    by_ticker = {r.ticker: r for r in reviews}
+
+    assert by_ticker["SHOP"].verdict == "HOLD"
+    assert by_ticker["SHOP"].verdict_tag == "HOLD"
+    assert "minimum hold 3/7d blocks score-based exit" in by_ticker["SHOP"].reason
+    assert by_ticker["RY.TO"].verdict == "HOLD"
+    assert by_ticker["RY.TO"].verdict_tag == "HOLD"
+    assert "minimum hold 10/15d blocks score-based exit" in by_ticker["RY.TO"].reason
+
+
+def test_review_holdings_min_hold_allows_put_spread_exit_after_one_day(monkeypatch):
+    monkeypatch.setattr(
+        "scanner.holdings_reviewer._score_position",
+        lambda pos, market_return_20d: (42.0, "mock"),
+    )
+
+    today = date.today()
+    positions = [
+        {
+            "ticker": "P0",
+            "account_type": "OPTIONS",
+            "sub_portfolio": "put-spread",
+            "entry_price": 1.0,
+            "quantity": 1,
+            "entry_composite_score": 70.0,
+            "entry_date": today.isoformat(),
+            "review_history": [],
+            "metadata": {"option_type": "put", "expiry": "2026-08-21", "strike": 100.0},
+        },
+        {
+            "ticker": "P1",
+            "account_type": "OPTIONS",
+            "sub_portfolio": "put-spread",
+            "entry_price": 1.0,
+            "quantity": 1,
+            "entry_composite_score": 70.0,
+            "entry_date": (today - timedelta(days=1)).isoformat(),
+            "review_history": [],
+            "metadata": {"option_type": "put", "expiry": "2026-08-21", "strike": 100.0},
+        },
+    ]
+
+    reviews = review_holdings(
+        positions,
+        thresholds={"min_hold_days": {"put_spread": 1}},
+        market_return_20d=0.0,
+        account_capitals={"OPTIONS": 20_000.0},
+    )
+    by_ticker = {r.ticker: r for r in reviews}
+
+    assert by_ticker["P0"].verdict == "HOLD"
+    assert "minimum hold 0/1d blocks score-based exit" in by_ticker["P0"].reason
+    assert by_ticker["P1"].verdict == "EXIT"
+    assert by_ticker["P1"].verdict_tag == "EXIT (score)"
+
+
+def test_review_holdings_hard_exit_override_bypasses_min_hold(monkeypatch):
+    monkeypatch.setattr(
+        "scanner.holdings_reviewer._score_position",
+        lambda pos, market_return_20d: (42.0, "mock"),
+    )
+
+    reviews = review_holdings(
+        [
+            {
+                "ticker": "NVDA",
+                "account_type": "TFSA",
+                "sub_portfolio": "growth",
+                "entry_price": 100.0,
+                "quantity": 10,
+                "entry_composite_score": 70.0,
+                "entry_date": (date.today() - timedelta(days=2)).isoformat(),
+                "review_history": [],
+                "metadata": {"stop_loss_breached": True},
+            }
+        ],
+        thresholds={"min_hold_days": {"growth": 7}},
+        market_return_20d=0.0,
+        account_capitals={"TFSA": 65_000.0},
+    )
+
+    assert reviews[0].verdict == "EXIT"
+    assert reviews[0].verdict_tag == "EXIT (score)"
+    assert "minimum hold" not in reviews[0].reason
 
 
 def test_review_holdings_enforces_options_sleeve_caps_and_cross_account_note(monkeypatch):

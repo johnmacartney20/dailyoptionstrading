@@ -4,7 +4,7 @@ Ticker lists and screening parameters for TSX and NASDAQ options scanning.
 Data source: Yahoo Finance (free public data via yfinance).
 """
 
-from typing import Dict, List
+from typing import Any, Dict, List
 
 # ── TSX (Toronto Stock Exchange) tickers ──────────────────────────────────────
 # Yahoo Finance uses the ".TO" suffix for TSX-listed stocks.
@@ -132,12 +132,20 @@ PORTFOLIO_STATE_FILE: str = "portfolio_state.json"
 # - score_decay_warn_pct: warning threshold for score decay vs entry score.
 # - entry_bar: minimum score required for new entries.
 # - displacement_margin: new score required above FLAG holding score to replace it.
-PORTFOLIO_THRESHOLDS: Dict[str, float] = {
+# - min_hold_days: per-sleeve minimum holding period before score-only exits apply.
+#   Sleeve keys are normalized with underscores (for example put_spread, long_call).
+PORTFOLIO_THRESHOLDS: Dict[str, Any] = {
     "hold_floor": 6.0,
     "hard_exit": 4.5,
     "score_decay_warn_pct": 0.30,
     "entry_bar": 8.0,
     "displacement_margin": 1.5,
+    "min_hold_days": {
+        "put_spread": 1,
+        "growth": 7,
+        "stability": 15,
+        "long_call": 7,
+    },
 }
 
 # ── Account capital settings (used for allocation + sizing) ─────────────────
