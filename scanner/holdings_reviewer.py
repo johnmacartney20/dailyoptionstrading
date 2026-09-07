@@ -277,6 +277,43 @@ def _days_to_expiry(expiry: str, as_of: date) -> Optional[int]:
     return max((exp_dt - as_of).days, 0)
 
 
+def _normalized_sleeve_key(sub_portfolio: str) -> str:
+    return str(sub_portfolio or "").strip().lower().replace("-", "_")
+
+
+def _min_hold_days_for_position(position: Dict[str, Any], thresholds: Dict[str, Any]) -> int:
+    min_hold_days = thresholds.get("min_hold_days", {}) if isinstance(thresholds, dict) else {}
+    if not isinstance(min_hold_days, dict):
+        return 0
+    sleeve_key = _normalized_sleeve_key(str(position.get("sub_portfolio", "")))
+    if sleeve_key in min_hold_days:
+        try:
+            return max(int(min_hold_days.get(sleeve_key, 0) or 0), 0)
+        except (TypeError, ValueError):
+            return 0
+    if sleeve_key == "long_call" and "growth" in min_hold_days:
+        try:
+            return max(int(min_hold_days.get("growth", 0) or 0), 0)
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
+def _has_hard_exit_override(position: Dict[str, Any]) -> bool:
+    metadata = position.get("metadata", {}) or {}
+    raw_flags = [
+        position.get("stop_loss_breached"),
+        position.get("thesis_invalidated"),
+        position.get("hard_invalidation"),
+        position.get("hard_exit_triggered"),
+        metadata.get("stop_loss_breached"),
+        metadata.get("thesis_invalidated"),
+        metadata.get("hard_invalidation"),
+        metadata.get("hard_exit_triggered"),
+    ]
+    return any(bool(flag) for flag in raw_flags)
+
+
 def _tier1_verdict(current_score: float, prior_flag_days: int) -> Tuple[str, str, str]:
     if not math.isfinite(current_score):
         return STATUS_HOLD, "HOLD", "score unavailable (non-finite); keeping position unchanged"
@@ -301,6 +338,28 @@ def _tier1_verdict(current_score: float, prior_flag_days: int) -> Tuple[str, str
         return STATUS_HOLD, "HOLD", f"score {current_score:.2f} in trim-watch band 60-70"
 
     return STATUS_HOLD, "HOLD", f"score {current_score:.2f} core HOLD >= 70"
+
+
+def _apply_min_hold_gate(
+    position: Dict[str, Any],
+    thresholds: Dict[str, Any],
+    days_held: int,
+    verdict: str,
+    verdict_tag: str,
+    reason: str,
+) -> Tuple[str, str, str]:
+    if verdict != STATUS_EXIT or verdict_tag != "EXIT (score)":
+        return verdict, verdict_tag, reason
+    if _has_hard_exit_override(position):
+        return verdict, verdict_tag, reason
+    min_hold_days = _min_hold_days_for_position(position, thresholds)
+    if days_held >= min_hold_days:
+        return verdict, verdict_tag, reason
+    return (
+        STATUS_HOLD,
+        "HOLD",
+        f"minimum hold {days_held}/{min_hold_days}d blocks score-based exit; {reason}",
+    )
 
 
 def _enforce_concentration_caps(reviews: List[HoldingReview]) -> None:
@@ -410,12 +469,11 @@ def _annotate_cross_account_exposure(
 
 def review_holdings(
     positions: Sequence[Dict[str, Any]],
-    thresholds: Dict[str, float],
+    thresholds: Dict[str, Any],
     market_return_20d: float = 0.0,
     account_capitals: Optional[Dict[str, float]] = None,
 ) -> List[HoldingReview]:
     """Re-score positions and return HOLD/FLAG/EXIT reviews."""
-    del thresholds  # Tiered lifecycle is now fixed by policy bands.
     capitals = {**ACCOUNT_CAPITAL_DEFAULTS, **(account_capitals or {})}
 
     reviews: List[HoldingReview] = []
@@ -432,12 +490,21 @@ def review_holdings(
         position_value = _position_value(pos)
         pct_of_account = (position_value / account_capital * 100.0) if account_capital > 0 else 0.0
         prior_flag_days = _count_consecutive_flag_days(pos)
+        days_held = _days_between(str(pos.get("entry_date", "")))
 
         current_score, score_reason = _score_position(pos, market_return_20d=market_return_20d)
         score_delta = current_score - entry_score
         verdict, verdict_tag, threshold_reason = _tier1_verdict(
             current_score=current_score,
             prior_flag_days=prior_flag_days,
+        )
+        verdict, verdict_tag, threshold_reason = _apply_min_hold_gate(
+            position=pos,
+            thresholds=thresholds,
+            days_held=days_held,
+            verdict=verdict,
+            verdict_tag=verdict_tag,
+            reason=threshold_reason,
         )
 
         reason = f"{threshold_reason}; {score_reason}"
@@ -449,7 +516,7 @@ def review_holdings(
                 entry_score=round(entry_score, 2),
                 current_score=round(current_score, 2),
                 score_delta=round(score_delta, 2),
-                days_held=_days_between(str(pos.get("entry_date", ""))),
+                days_held=days_held,
                 verdict=verdict,
                 verdict_tag=verdict_tag,
                 reason=reason,
