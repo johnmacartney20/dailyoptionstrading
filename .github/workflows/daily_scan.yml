@@ -1,16 +1,16 @@
 name: Daily Options Scan
 
 on:
-  # Runs at 14:30 UTC on weekdays = 10:30 AM EDT / 9:30 AM EST
+  # Runs at 12:30 UTC on weekdays = 9:30 AM ADT / 8:30 AM AST
   # This runs closer to the start of the trading day while still avoiding
   # the very earliest opening-minute noise in options chains during DST.
   # Adjust the cron expression if you want a different time:
   #   "15 16 * * 1-5"  = 12:15 PM EDT / 11:15 AM EST
-  #   "30 14 * * 1-5"  = 10:30 AM EDT / 9:30 AM EST
+  #   "30 12 * * 1-5"  = 9:30 AM ADT / 8:30 AM AST
   #   "30 16 * * 1-5"  = 12:30 PM EDT / 11:30 AM EST
   #   "0  21 * * 1-5"  = 5:00 PM EDT / 4:00 PM EST (after-hours)
   schedule:
-    - cron: "30 14 * * 1-5"
+    - cron: "30 12 * * 1-5"
 
   # Also allows triggering manually from the GitHub Actions tab
   workflow_dispatch:
