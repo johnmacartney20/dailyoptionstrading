@@ -79,8 +79,9 @@ These flags only affect the **monthly** TFSA + RRSP review email (triggered via 
 ## Automated Daily Email via GitHub Actions
 
 The workflow at `.github/workflows/daily_scan.yml` runs the scanner automatically
-every weekday at **9:30 AM ADT / 8:30 AM AST** (12:30 UTC) and emails you the results.
-This sends suggestions closer to the start of the trading day.
+every weekday at **7:00 AM ET** and **9:30 AM ET** and emails you the results.
+Because GitHub Actions cron uses UTC, the workflow includes both daylight-saving and
+standard-time UTC schedules and then gates execution using the `America/New_York` timezone.
 
 ### One-time setup (5 minutes)
 
@@ -125,17 +126,22 @@ You can also trigger the workflow on demand:
 
 ### Changing the schedule
 
-Edit the `cron` line in `.github/workflows/daily_scan.yml`:
+Edit the scheduled UTC entries in `.github/workflows/daily_scan.yml`:
 
 ```yaml
-# Current: 12:30 UTC = 9:30 AM ADT / 8:30 AM AST
-- cron: "30 12 * * 1-5"
+# Current ET targets:
+#   7:00 AM ET  -> 11:00 UTC (EDT) / 12:00 UTC (EST)
+#   9:30 AM ET  -> 13:30 UTC (EDT) / 14:30 UTC (EST)
+- cron: "0 11 * * 1-5"
+- cron: "0 12 * * 1-5"
+- cron: "30 13 * * 1-5"
+- cron: "30 14 * * 1-5"
 
 # Examples:
 # "15 16 * * 1-5"  = 12:15 PM EDT / 11:15 AM EST
-# "30 12 * * 1-5"  = 9:30 AM ADT / 8:30 AM AST
-# "0  21 * * 1-5"  = 5:00 PM EDT / 4:00 PM EST (after-hours recap)
 # "0  14 * * 1-5"  = 10:00 AM EDT / 9:00 AM EST
+# "30 14 * * 1-5"  = 10:30 AM EDT / 9:30 AM EST
+# "0  21 * * 1-5"  = 5:00 PM EDT / 4:00 PM EST (after-hours recap)
 ```
 
 ## Project Layout
