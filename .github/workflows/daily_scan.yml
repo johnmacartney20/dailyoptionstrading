@@ -1,16 +1,16 @@
 name: Daily Options Scan
 
 on:
-  # Runs at 12:30 UTC on weekdays = 9:30 AM ADT / 8:30 AM AST
-  # This runs closer to the start of the trading day while still avoiding
-  # the very earliest opening-minute noise in options chains during DST.
-  # Adjust the cron expression if you want a different time:
-  #   "15 16 * * 1-5"  = 12:15 PM EDT / 11:15 AM EST
-  #   "30 12 * * 1-5"  = 9:30 AM ADT / 8:30 AM AST
-  #   "30 16 * * 1-5"  = 12:30 PM EDT / 11:30 AM EST
-  #   "0  21 * * 1-5"  = 5:00 PM EDT / 4:00 PM EST (after-hours)
+  # GitHub Actions cron is UTC-only, so schedule both EDT and EST equivalents
+  # and gate execution below using America/New_York local time.
+  # Target run times:
+  #   7:00 AM ET  -> 11:00 UTC (EDT) / 12:00 UTC (EST)
+  #   9:30 AM ET  -> 13:30 UTC (EDT) / 14:30 UTC (EST)
   schedule:
-    - cron: "30 12 * * 1-5"
+    - cron: "0 11 * * 1-5"
+    - cron: "0 12 * * 1-5"
+    - cron: "30 13 * * 1-5"
+    - cron: "30 14 * * 1-5"
 
   # Also allows triggering manually from the GitHub Actions tab
   workflow_dispatch:
@@ -40,16 +40,35 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Check scheduled Eastern run window
+        id: schedule_guard
+        if: github.event_name == 'schedule'
+        run: |
+          CURRENT_ET="$(TZ=America/New_York date +%H:%M)"
+          case "$CURRENT_ET" in
+            07:0[0-9]|07:1[0-5]|09:3[0-9]|09:4[0-5])
+              echo "run_scan=true" >> "$GITHUB_OUTPUT"
+              echo "Running scheduled scan at $CURRENT_ET ET."
+              ;;
+            *)
+              echo "run_scan=false" >> "$GITHUB_OUTPUT"
+              echo "Skipping scheduled scan at $CURRENT_ET ET."
+              ;;
+          esac
+
       - name: Set up Python
+        if: github.event_name != 'schedule' || steps.schedule_guard.outputs.run_scan == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
 
       - name: Install dependencies
+        if: github.event_name != 'schedule' || steps.schedule_guard.outputs.run_scan == 'true'
         run: pip install -r requirements.txt
 
       - name: Run scanner and send email
+        if: github.event_name != 'schedule' || steps.schedule_guard.outputs.run_scan == 'true'
         env:
           # ── Set these secrets in:
           #    GitHub repo → Settings → Secrets and variables → Actions → New repository secret
@@ -70,6 +89,7 @@ jobs:
             --email    "${{ secrets.EMAIL_TO }}"
 
       - name: Persist updated portfolio state
+        if: github.event_name != 'schedule' || steps.schedule_guard.outputs.run_scan == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
