@@ -3,12 +3,9 @@ name: Daily Options Scan
 on:
   # GitHub Actions cron is UTC-only, so schedule both EDT and EST equivalents
   # and gate execution below using America/New_York local time.
-  # Target run times:
-  #   7:00 AM ET  -> 11:00 UTC (EDT) / 12:00 UTC (EST)
+  # Target run time:
   #   9:30 AM ET  -> 13:30 UTC (EDT) / 14:30 UTC (EST)
   schedule:
-    - cron: "0 11 * * 1-5"
-    - cron: "0 12 * * 1-5"
     - cron: "30 13 * * 1-5"
     - cron: "30 14 * * 1-5"
 
@@ -46,7 +43,7 @@ jobs:
         run: |
           CURRENT_ET="$(TZ=America/New_York date +%H:%M)"
           case "$CURRENT_ET" in
-            07:0[0-9]|07:1[0-5]|09:3[0-9]|09:4[0-5])
+            09:3[0-9]|09:[4-5][0-9])
               echo "run_scan=true" >> "$GITHUB_OUTPUT"
               echo "Running scheduled scan at $CURRENT_ET ET."
               ;;
