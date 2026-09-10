@@ -40,16 +40,18 @@ jobs:
       - name: Check scheduled Eastern run window
         id: schedule_guard
         if: github.event_name == 'schedule'
+        env:
+          TRIGGER_CRON: ${{ github.event.schedule }}
         run: |
-          CURRENT_ET="$(TZ=America/New_York date +%H:%M)"
-          case "$CURRENT_ET" in
-            09:3[0-9]|09:[4-5][0-9])
+          CURRENT_ET_OFFSET="$(TZ=America/New_York date +%z)"
+          case "$CURRENT_ET_OFFSET:$TRIGGER_CRON" in
+            -0400:30\ 13\ \*\ \*\ 1-5|-0500:30\ 14\ \*\ \*\ 1-5)
               echo "run_scan=true" >> "$GITHUB_OUTPUT"
-              echo "Running scheduled scan at $CURRENT_ET ET."
+              echo "Running scheduled scan for cron '$TRIGGER_CRON' with ET offset $CURRENT_ET_OFFSET."
               ;;
             *)
               echo "run_scan=false" >> "$GITHUB_OUTPUT"
-              echo "Skipping scheduled scan at $CURRENT_ET ET."
+              echo "Skipping scheduled scan for cron '$TRIGGER_CRON' with ET offset $CURRENT_ET_OFFSET."
               ;;
           esac
 
