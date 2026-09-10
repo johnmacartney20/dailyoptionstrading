@@ -81,7 +81,8 @@ These flags only affect the **monthly** TFSA + RRSP review email (triggered via 
 The workflow at `.github/workflows/daily_scan.yml` runs the scanner automatically
 every weekday at **9:30 AM ET** (market open) and emails you the results.
 Because GitHub Actions cron uses UTC, the workflow includes both daylight-saving and
-standard-time UTC schedules and then gates execution using the `America/New_York` timezone.
+standard-time UTC schedules and then gates execution by matching the triggered cron entry
+against the current `America/New_York` UTC offset.
 
 ### One-time setup (5 minutes)
 
