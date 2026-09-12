@@ -83,7 +83,7 @@ every weekday at **9:30 AM ET** (market open) and emails you the results.
 Because GitHub Actions cron uses UTC, the workflow includes both daylight-saving and
 standard-time UTC schedules and then gates execution by matching the triggered cron entry
 against the current `America/New_York` UTC offset. Scheduled runs also skip themselves
-unless the job actually starts during a **9:30-9:44 AM ET** market-open window, so a
+unless the job actually starts during a **9:30-9:45 AM ET** market-open window, so a
 late GitHub cron dispatch will not send an afternoon email.
 
 ### One-time setup (5 minutes)
@@ -137,7 +137,7 @@ Edit the scheduled UTC entries in `.github/workflows/daily_scan.yml`:
 - cron: "30 13 * * 1-5"
 - cron: "30 14 * * 1-5"
 
-# Scheduled runs also self-skip unless they begin between 9:30-9:44 AM ET.
+# Scheduled runs also self-skip unless they begin between 9:30-9:45 AM ET.
 
 # Examples:
 # "15 16 * * 1-5"  = 12:15 PM EDT / 11:15 AM EST

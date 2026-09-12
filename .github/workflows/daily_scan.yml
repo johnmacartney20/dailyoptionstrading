@@ -49,7 +49,7 @@ jobs:
           CURRENT_ET_TIME="$(TZ=America/New_York date +%H:%M)"
           CURRENT_ET_TOTAL_MINUTES=$((10#$CURRENT_ET_HOUR * 60 + 10#$CURRENT_ET_MINUTE))
           MARKET_OPEN_MINUTES=$((9 * 60 + 30))
-          MARKET_OPEN_LATEST_MINUTES=$((9 * 60 + 44))
+          MARKET_OPEN_LATEST_MINUTES=$((9 * 60 + 45))
 
           EXPECTED_CRON=""
           case "$CURRENT_ET_OFFSET" in
@@ -65,7 +65,7 @@ jobs:
             echo "Skipping scheduled scan for cron '$TRIGGER_CRON'; expected '$EXPECTED_CRON' for ET offset $CURRENT_ET_OFFSET."
           elif [ "$CURRENT_ET_TOTAL_MINUTES" -lt "$MARKET_OPEN_MINUTES" ] || [ "$CURRENT_ET_TOTAL_MINUTES" -gt "$MARKET_OPEN_LATEST_MINUTES" ]; then
             echo "run_scan=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping scheduled scan because it started at $CURRENT_ET_TIME ET, outside the 9:30-9:44 ET market-open window."
+            echo "Skipping scheduled scan because it started at $CURRENT_ET_TIME ET, outside the 9:30-9:45 ET market-open window."
           else
             echo "run_scan=true" >> "$GITHUB_OUTPUT"
             echo "Running scheduled scan for cron '$TRIGGER_CRON' at $CURRENT_ET_TIME ET."
