@@ -44,16 +44,32 @@ jobs:
           TRIGGER_CRON: ${{ github.event.schedule }}
         run: |
           CURRENT_ET_OFFSET="$(TZ=America/New_York date +%z)"
-          case "$CURRENT_ET_OFFSET:$TRIGGER_CRON" in
-            -0400:30\ 13\ \*\ \*\ 1-5|-0500:30\ 14\ \*\ \*\ 1-5)
-              echo "run_scan=true" >> "$GITHUB_OUTPUT"
-              echo "Running scheduled scan for cron '$TRIGGER_CRON' with ET offset $CURRENT_ET_OFFSET."
-              ;;
-            *)
-              echo "run_scan=false" >> "$GITHUB_OUTPUT"
-              echo "Skipping scheduled scan for cron '$TRIGGER_CRON' with ET offset $CURRENT_ET_OFFSET."
-              ;;
+          CURRENT_ET_HOUR="$(TZ=America/New_York date +%H)"
+          CURRENT_ET_MINUTE="$(TZ=America/New_York date +%M)"
+          CURRENT_ET_TIME="$(TZ=America/New_York date +%H:%M)"
+          CURRENT_ET_TOTAL_MINUTES=$((10#$CURRENT_ET_HOUR * 60 + 10#$CURRENT_ET_MINUTE))
+          MARKET_OPEN_MINUTES=$((9 * 60 + 30))
+          MARKET_OPEN_LATEST_MINUTES=$((9 * 60 + 45))
+
+          EXPECTED_CRON=""
+          case "$CURRENT_ET_OFFSET" in
+            -0400) EXPECTED_CRON="30 13 * * 1-5" ;;
+            -0500) EXPECTED_CRON="30 14 * * 1-5" ;;
           esac
+
+          if [ -z "$EXPECTED_CRON" ]; then
+            echo "run_scan=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping scheduled scan because ET offset $CURRENT_ET_OFFSET is not mapped to a market-open cron."
+          elif [ "$TRIGGER_CRON" != "$EXPECTED_CRON" ]; then
+            echo "run_scan=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping scheduled scan for cron '$TRIGGER_CRON'; expected '$EXPECTED_CRON' for ET offset $CURRENT_ET_OFFSET."
+          elif [ "$CURRENT_ET_TOTAL_MINUTES" -lt "$MARKET_OPEN_MINUTES" ] || [ "$CURRENT_ET_TOTAL_MINUTES" -gt "$MARKET_OPEN_LATEST_MINUTES" ]; then
+            echo "run_scan=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping scheduled scan because it started at $CURRENT_ET_TIME ET, outside the 9:30-9:45 ET market-open window."
+          else
+            echo "run_scan=true" >> "$GITHUB_OUTPUT"
+            echo "Running scheduled scan for cron '$TRIGGER_CRON' at $CURRENT_ET_TIME ET."
+          fi
 
       - name: Set up Python
         if: github.event_name != 'schedule' || steps.schedule_guard.outputs.run_scan == 'true'
