@@ -100,11 +100,11 @@ jobs:
             exit 1
           elif [ "$CURRENT_ET_TOTAL_MINUTES" -lt "$WINDOW_START_MINUTES" ] || [ "$CURRENT_ET_TOTAL_MINUTES" -gt "$WINDOW_END_MINUTES" ]; then
             echo "run_scan=false" >> "$GITHUB_OUTPUT"
-            echo "Failing scheduled scan because it started at $CURRENT_ET_TIME, outside the 8:00-11:00 ET allowed window."
+            echo "Failing scheduled scan because it started at $CURRENT_ET_TIME, outside the 8:00-11:00 ET inclusive allowed window."
             exit 1
           else
             echo "run_scan=true" >> "$GITHUB_OUTPUT"
-            echo "Running scheduled scan for cron '$TRIGGER_CRON' at $CURRENT_ET_TIME within the 8:00-11:00 ET allowed window."
+            echo "Running scheduled scan for cron '$TRIGGER_CRON' at $CURRENT_ET_TIME within the 8:00-11:00 ET inclusive allowed window."
           fi
 
       - name: Set up Python
