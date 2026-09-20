@@ -4,10 +4,10 @@ on:
   # GitHub Actions cron is UTC-only, so schedule both EDT and EST equivalents
   # and gate execution below using America/New_York local time.
   # Target run time:
-  #   9:30 AM ET  -> 13:30 UTC (EDT) / 14:30 UTC (EST)
+  #   8:45 AM ET  -> 12:45 UTC (EDT) / 13:45 UTC (EST)
   schedule:
-    - cron: "30 13 * * 1-5"
-    - cron: "30 14 * * 1-5"
+    - cron: "45 12 * * 1-5"
+    - cron: "45 13 * * 1-5"
 
   # Also allows triggering manually from the GitHub Actions tab
   workflow_dispatch:
@@ -37,6 +37,25 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Log scheduled vs actual start time
+        env:
+          TRIGGER_CRON: ${{ github.event.schedule || 'manual' }}
+        run: |
+          ACTUAL_UTC_TIME="$(date -u +'%Y-%m-%d %H:%M UTC')"
+          ACTUAL_ET_TIME="$(TZ=America/New_York date +'%Y-%m-%d %H:%M %Z')"
+
+          SCHEDULED_ET_TIME="manual / n/a"
+          case "$TRIGGER_CRON" in
+            "45 12 * * 1-5") SCHEDULED_ET_TIME="08:45 ET (EDT schedule)" ;;
+            "45 13 * * 1-5") SCHEDULED_ET_TIME="08:45 ET (EST schedule)" ;;
+          esac
+
+          echo "Trigger event: ${{ github.event_name }}"
+          echo "Scheduled cron: $TRIGGER_CRON"
+          echo "Scheduled ET target: $SCHEDULED_ET_TIME"
+          echo "Actual dispatch time (UTC): $ACTUAL_UTC_TIME"
+          echo "Actual dispatch time (ET): $ACTUAL_ET_TIME"
+
       - name: Check scheduled Eastern run window
         id: schedule_guard
         if: github.event_name == 'schedule'
@@ -46,29 +65,46 @@ jobs:
           CURRENT_ET_OFFSET="$(TZ=America/New_York date +%z)"
           CURRENT_ET_HOUR="$(TZ=America/New_York date +%H)"
           CURRENT_ET_MINUTE="$(TZ=America/New_York date +%M)"
-          CURRENT_ET_TIME="$(TZ=America/New_York date +%H:%M)"
+          CURRENT_ET_TIME="$(TZ=America/New_York date +'%Y-%m-%d %H:%M %Z')"
+          CURRENT_UTC_TIME="$(date -u +'%Y-%m-%d %H:%M UTC')"
           CURRENT_ET_TOTAL_MINUTES=$((10#$CURRENT_ET_HOUR * 60 + 10#$CURRENT_ET_MINUTE))
-          MARKET_OPEN_MINUTES=$((9 * 60 + 30))
-          MARKET_OPEN_LATEST_MINUTES=$((9 * 60 + 45))
+          WINDOW_START_MINUTES=$((8 * 60))
+          WINDOW_END_MINUTES=$((11 * 60))
 
           EXPECTED_CRON=""
+          EXPECTED_ET_TARGET=""
           case "$CURRENT_ET_OFFSET" in
-            -0400) EXPECTED_CRON="30 13 * * 1-5" ;;
-            -0500) EXPECTED_CRON="30 14 * * 1-5" ;;
+            -0400)
+              EXPECTED_CRON="45 12 * * 1-5"
+              EXPECTED_ET_TARGET="08:45 ET (EDT schedule)"
+              ;;
+            -0500)
+              EXPECTED_CRON="45 13 * * 1-5"
+              EXPECTED_ET_TARGET="08:45 ET (EST schedule)"
+              ;;
           esac
+
+          echo "Scheduled cron: $TRIGGER_CRON"
+          echo "Expected cron for current ET offset: ${EXPECTED_CRON:-unmapped}"
+          echo "Expected ET target: ${EXPECTED_ET_TARGET:-unmapped}"
+          echo "Actual dispatch time (UTC): $CURRENT_UTC_TIME"
+          echo "Actual dispatch time (ET): $CURRENT_ET_TIME"
 
           if [ -z "$EXPECTED_CRON" ]; then
             echo "run_scan=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping scheduled scan because ET offset $CURRENT_ET_OFFSET is not mapped to a market-open cron."
+            echo "Failing scheduled scan because ET offset $CURRENT_ET_OFFSET is not mapped to an 8:45 ET cron."
+            exit 1
           elif [ "$TRIGGER_CRON" != "$EXPECTED_CRON" ]; then
             echo "run_scan=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping scheduled scan for cron '$TRIGGER_CRON'; expected '$EXPECTED_CRON' for ET offset $CURRENT_ET_OFFSET."
-          elif [ "$CURRENT_ET_TOTAL_MINUTES" -lt "$MARKET_OPEN_MINUTES" ] || [ "$CURRENT_ET_TOTAL_MINUTES" -gt "$MARKET_OPEN_LATEST_MINUTES" ]; then
+            echo "Failing scheduled scan for cron '$TRIGGER_CRON'; expected '$EXPECTED_CRON' for ET offset $CURRENT_ET_OFFSET."
+            exit 1
+          elif [ "$CURRENT_ET_TOTAL_MINUTES" -lt "$WINDOW_START_MINUTES" ] || [ "$CURRENT_ET_TOTAL_MINUTES" -gt "$WINDOW_END_MINUTES" ]; then
             echo "run_scan=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping scheduled scan because it started at $CURRENT_ET_TIME ET, outside the 9:30-9:45 ET market-open window."
+            echo "Failing scheduled scan because it started at $CURRENT_ET_TIME, outside the 8:00-11:00 ET allowed window."
+            exit 1
           else
             echo "run_scan=true" >> "$GITHUB_OUTPUT"
-            echo "Running scheduled scan for cron '$TRIGGER_CRON' at $CURRENT_ET_TIME ET."
+            echo "Running scheduled scan for cron '$TRIGGER_CRON' at $CURRENT_ET_TIME within the 8:00-11:00 ET allowed window."
           fi
 
       - name: Set up Python
