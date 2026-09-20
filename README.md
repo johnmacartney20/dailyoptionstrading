@@ -84,8 +84,7 @@ Because GitHub Actions cron uses UTC, the workflow includes both daylight-saving
 standard-time UTC schedules and then gates execution by matching the triggered cron entry
 against the current `America/New_York` UTC offset. Scheduled runs also log the scheduled
 cron time versus the actual dispatch time, and they only proceed when the job actually
-starts between **8:00 AM ET and 11:00 AM ET, with 11:00 AM as the latest accepted
-start minute**. If the guard blocks a scheduled run, the
+starts between **8:00 AM ET and 11:59 AM ET**. If the guard blocks a scheduled run, the
 workflow fails visibly in GitHub Actions instead of reporting a silent green success.
 
 ### One-time setup (5 minutes)
@@ -140,7 +139,7 @@ Edit the scheduled UTC entries in `.github/workflows/daily_scan.yml`:
 - cron: "45 13 * * 1-5"
 
 # Scheduled runs fail visibly unless they begin between 8:00 AM ET and
-# 11:00 AM ET, with 11:00 AM as the latest accepted start minute.
+# 11:59 AM ET.
 
 # Examples:
 # "15 16 * * 1-5"  = 12:15 PM EDT / 11:15 AM EST
