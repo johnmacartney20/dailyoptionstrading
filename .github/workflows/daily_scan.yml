@@ -68,7 +68,7 @@ jobs:
           CURRENT_ET_TIME="$(TZ=America/New_York date +'%Y-%m-%d %H:%M %Z')"
           CURRENT_UTC_TIME="$(date -u +'%Y-%m-%d %H:%M UTC')"
           CURRENT_ET_TOTAL_MINUTES=$((10#$CURRENT_ET_HOUR * 60 + 10#$CURRENT_ET_MINUTE))
-          WINDOW_START_MINUTES=$((8 * 60))
+          WINDOW_START_MINUTES=$((7 * 60 + 45))
           WINDOW_END_MINUTES=$((11 * 60 + 59))
 
           EXPECTED_CRON=""
@@ -100,11 +100,11 @@ jobs:
             exit 1
           elif [ "$CURRENT_ET_TOTAL_MINUTES" -lt "$WINDOW_START_MINUTES" ] || [ "$CURRENT_ET_TOTAL_MINUTES" -gt "$WINDOW_END_MINUTES" ]; then
             echo "run_scan=false" >> "$GITHUB_OUTPUT"
-            echo "Failing scheduled scan because it started at $CURRENT_ET_TIME, outside the allowed ET dispatch window (08:00 through 11:59)."
+            echo "Failing scheduled scan because it started at $CURRENT_ET_TIME, outside the allowed ET dispatch window (07:45 through 11:59)."
             exit 1
           else
             echo "run_scan=true" >> "$GITHUB_OUTPUT"
-            echo "Running scheduled scan for cron '$TRIGGER_CRON' at $CURRENT_ET_TIME within the allowed ET dispatch window (08:00 through 11:59)."
+            echo "Running scheduled scan for cron '$TRIGGER_CRON' at $CURRENT_ET_TIME within the allowed ET dispatch window (07:45 through 11:59)."
           fi
 
       - name: Set up Python
