@@ -79,12 +79,13 @@ These flags only affect the **monthly** TFSA + RRSP review email (triggered via 
 ## Automated Daily Email via GitHub Actions
 
 The workflow at `.github/workflows/daily_scan.yml` runs the scanner automatically
-every weekday at **9:30 AM ET** (market open) and emails you the results.
+every weekday with an **8:45 AM ET** target and emails you the results.
 Because GitHub Actions cron uses UTC, the workflow includes both daylight-saving and
 standard-time UTC schedules and then gates execution by matching the triggered cron entry
-against the current `America/New_York` UTC offset. Scheduled runs also skip themselves
-unless the job actually starts during a **9:30-9:45 AM ET** market-open window, so a
-late GitHub cron dispatch will not send an afternoon email.
+against the current `America/New_York` UTC offset. Scheduled runs also log the scheduled
+cron time versus the actual dispatch time, and they only proceed when the job actually
+starts between **7:45 AM ET and 11:59 AM ET**. If the guard blocks a scheduled run, the
+workflow fails visibly in GitHub Actions instead of reporting a silent green success.
 
 ### One-time setup (5 minutes)
 
@@ -133,16 +134,17 @@ Edit the scheduled UTC entries in `.github/workflows/daily_scan.yml`:
 
 ```yaml
 # Current ET target:
-#   9:30 AM ET  -> 13:30 UTC (EDT) / 14:30 UTC (EST)
-- cron: "30 13 * * 1-5"
-- cron: "30 14 * * 1-5"
+#   8:45 AM ET  -> 12:45 UTC (EDT) / 13:45 UTC (EST)
+- cron: "45 12 * * 1-5"
+- cron: "45 13 * * 1-5"
 
-# Scheduled runs also self-skip unless they begin between 9:30-9:45 AM ET.
+# Scheduled runs fail visibly unless they begin between 7:45 AM ET and
+# 11:59 AM ET.
 
 # Examples:
 # "15 16 * * 1-5"  = 12:15 PM EDT / 11:15 AM EST
 # "0  14 * * 1-5"  = 10:00 AM EDT / 9:00 AM EST
-# "30 14 * * 1-5"  = 10:30 AM EDT / 9:30 AM EST
+# "45 13 * * 1-5" = 9:45 AM EDT / 8:45 AM EST
 # "0  21 * * 1-5"  = 5:00 PM EDT / 4:00 PM EST (after-hours recap)
 ```
 
