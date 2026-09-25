@@ -1065,6 +1065,38 @@
     },
     {
       "account_type": "OPTIONS",
+      "entry_composite_score": 81.39,
+      "entry_date": "2026-09-25",
+      "entry_price": 97.01,
+      "entry_thesis_tags": [
+        "above 20MA",
+        "above 50MA",
+        "outperforming market"
+      ],
+      "exit_date": "2026-09-25",
+      "exit_score": 75.12,
+      "last_review_date": "2026-09-25",
+      "last_review_reason": "cap 2 exceeded in OPTIONS/stock; forced trim",
+      "last_review_score": 75.12,
+      "metadata": {
+        "asset_type": "equity",
+        "cad_equiv": 2421.46
+      },
+      "quantity": 24,
+      "review_history": [
+        {
+          "date": "2026-09-25",
+          "reason": "cap 2 exceeded in OPTIONS/stock; forced trim",
+          "score": 75.12,
+          "status": "EXIT"
+        }
+      ],
+      "status": "EXIT",
+      "sub_portfolio": "growth",
+      "ticker": "SU.TO"
+    },
+    {
+      "account_type": "OPTIONS",
       "entry_composite_score": 0.0,
       "entry_date": "2026-07-07",
       "entry_price": 39.02,
@@ -1752,7 +1784,7 @@
       "ticker": "VFV"
     }
   ],
-  "generated_at": "2026-09-25T12:57:57Z",
+  "generated_at": "2026-09-25T17:32:47Z",
   "positions": [
     {
       "account_type": "FHSA",
@@ -1788,8 +1820,8 @@
         "low vol (21%)"
       ],
       "last_review_date": "2026-09-25",
-      "last_review_reason": "score 79.82 core HOLD >= 70; above 20MA; above 50MA; outperforming market; low vol (22%); strong liquidity; cross-account exposure AAPL: $9,635 (6.6% total capital)",
-      "last_review_score": 79.82,
+      "last_review_reason": "score 83.47 core HOLD >= 70; above 20MA; above 50MA; outperforming market; low vol (22%); strong liquidity; cross-account exposure AAPL: $9,635 (6.6% total capital)",
+      "last_review_score": 83.47,
       "metadata": {},
       "quantity": 12,
       "review_history": [
@@ -1858,6 +1890,12 @@
           "reason": "score 79.82 core HOLD >= 70; above 20MA; above 50MA; outperforming market; low vol (22%); strong liquidity; cross-account exposure AAPL: $9,635 (6.6% total capital)",
           "score": 79.82,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-09-25",
+          "reason": "score 83.47 core HOLD >= 70; above 20MA; above 50MA; outperforming market; low vol (22%); strong liquidity; cross-account exposure AAPL: $9,635 (6.6% total capital)",
+          "score": 83.47,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -1875,8 +1913,8 @@
         "outperforming market"
       ],
       "last_review_date": "2026-09-25",
-      "last_review_reason": "score 64.97 in trim-watch band 60-70; above 20MA; above 50MA; low vol (22%); strong liquidity; cross-account exposure GILD: $26,274 (18.1% total capital)",
-      "last_review_score": 64.97,
+      "last_review_reason": "score 67.89 in trim-watch band 60-70; above 20MA; above 50MA; low vol (22%); strong liquidity; cross-account exposure GILD: $26,274 (18.1% total capital)",
+      "last_review_score": 67.89,
       "metadata": {},
       "quantity": 37,
       "review_history": [
@@ -1945,6 +1983,12 @@
           "reason": "score 64.97 in trim-watch band 60-70; above 20MA; above 50MA; low vol (22%); strong liquidity; cross-account exposure GILD: $26,274 (18.1% total capital)",
           "score": 64.97,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-09-25",
+          "reason": "score 67.89 in trim-watch band 60-70; above 20MA; above 50MA; low vol (22%); strong liquidity; cross-account exposure GILD: $26,274 (18.1% total capital)",
+          "score": 67.89,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -1962,8 +2006,8 @@
         "low vol (11%)"
       ],
       "last_review_date": "2026-09-25",
-      "last_review_reason": "score 66.05 in trim-watch band 60-70; above 20MA; above 50MA; low vol (11%); strong liquidity; cross-account exposure SPY: $25,509 (17.6% total capital)",
-      "last_review_score": 66.05,
+      "last_review_reason": "score 66.40 in trim-watch band 60-70; above 20MA; above 50MA; low vol (11%); strong liquidity; cross-account exposure SPY: $25,509 (17.6% total capital)",
+      "last_review_score": 66.4,
       "metadata": {},
       "quantity": 28,
       "review_history": [
@@ -1990,6 +2034,12 @@
           "reason": "score 66.05 in trim-watch band 60-70; above 20MA; above 50MA; low vol (11%); strong liquidity; cross-account exposure SPY: $25,509 (17.6% total capital)",
           "score": 66.05,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-09-25",
+          "reason": "score 66.40 in trim-watch band 60-70; above 20MA; above 50MA; low vol (11%); strong liquidity; cross-account exposure SPY: $25,509 (17.6% total capital)",
+          "score": 66.4,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -2007,8 +2057,8 @@
         "outperforming market"
       ],
       "last_review_date": "2026-09-25",
-      "last_review_reason": "minimum hold 5/7d blocks score-based exit; score 51.08 in severe FLAG band 45-52; below 20MA; below 50MA; low vol (16%); strong liquidity; cross-account exposure TD: $8,634 (6.0% total capital)",
-      "last_review_score": 51.08,
+      "last_review_reason": "score 70.72 core HOLD >= 70; above 20MA; above 50MA; low vol (16%); strong liquidity; cross-account exposure TD: $8,634 (6.0% total capital)",
+      "last_review_score": 70.72,
       "metadata": {},
       "quantity": 27,
       "review_history": [
@@ -2041,6 +2091,12 @@
           "reason": "minimum hold 5/7d blocks score-based exit; score 51.08 in severe FLAG band 45-52; below 20MA; below 50MA; low vol (16%); strong liquidity; cross-account exposure TD: $8,634 (6.0% total capital)",
           "score": 51.08,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-09-25",
+          "reason": "score 70.72 core HOLD >= 70; above 20MA; above 50MA; low vol (16%); strong liquidity; cross-account exposure TD: $8,634 (6.0% total capital)",
+          "score": 70.72,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -2061,10 +2117,10 @@
       "last_review_reason": "",
       "last_review_score": null,
       "metadata": {
-        "cash_amount": 13772.75,
+        "cash_amount": 13707.74,
         "is_cash": true
       },
-      "quantity": 13773,
+      "quantity": 13708,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "cash-reserve",
@@ -2081,8 +2137,8 @@
         "outperforming market"
       ],
       "last_review_date": "2026-09-25",
-      "last_review_reason": "score 79.82 core HOLD >= 70; above 20MA; above 50MA; outperforming market; low vol (22%); strong liquidity; cross-account exposure AAPL: $9,635 (6.6% total capital)",
-      "last_review_score": 79.82,
+      "last_review_reason": "score 83.47 core HOLD >= 70; above 20MA; above 50MA; outperforming market; low vol (22%); strong liquidity; cross-account exposure AAPL: $9,635 (6.6% total capital)",
+      "last_review_score": 83.47,
       "metadata": {
         "asset_type": "equity",
         "cad_equiv": 1956.02
@@ -2130,6 +2186,12 @@
           "reason": "score 79.82 core HOLD >= 70; above 20MA; above 50MA; outperforming market; low vol (22%); strong liquidity; cross-account exposure AAPL: $9,635 (6.6% total capital)",
           "score": 79.82,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-09-25",
+          "reason": "score 83.47 core HOLD >= 70; above 20MA; above 50MA; outperforming market; low vol (22%); strong liquidity; cross-account exposure AAPL: $9,635 (6.6% total capital)",
+          "score": 83.47,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -2147,7 +2209,7 @@
         "outperforming market"
       ],
       "last_review_date": "2026-09-25",
-      "last_review_reason": "score 77.00 core HOLD >= 70; above 20MA; above 50MA; outperforming market; high vol (51%) penalised; strong liquidity; cross-account exposure MU: $18,598 (12.8% total capital)",
+      "last_review_reason": "score 77.00 core HOLD >= 70; above 20MA; above 50MA; outperforming market; high vol (50%) penalised; strong liquidity; cross-account exposure MU: $18,598 (12.8% total capital)",
       "last_review_score": 77.0,
       "metadata": {
         "asset_type": "equity",
@@ -2160,6 +2222,12 @@
           "reason": "score 77.00 core HOLD >= 70; above 20MA; above 50MA; outperforming market; high vol (51%) penalised; strong liquidity; cross-account exposure MU: $18,598 (12.8% total capital)",
           "score": 77.0,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-09-25",
+          "reason": "score 77.00 core HOLD >= 70; above 20MA; above 50MA; outperforming market; high vol (50%) penalised; strong liquidity; cross-account exposure MU: $18,598 (12.8% total capital)",
+          "score": 77.0,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -2168,13 +2236,13 @@
     },
     {
       "account_type": "OPTIONS",
-      "entry_composite_score": 81.39,
+      "entry_composite_score": 75.09,
       "entry_date": "2026-09-25",
-      "entry_price": 97.01,
+      "entry_price": 95.73,
       "entry_thesis_tags": [
         "above 20MA",
         "above 50MA",
-        "outperforming market"
+        "strong liquidity"
       ],
       "last_review_date": null,
       "last_review_reason": "",
@@ -2183,7 +2251,7 @@
         "asset_type": "equity",
         "cad_equiv": 2421.46
       },
-      "quantity": 24,
+      "quantity": 25,
       "review_history": [],
       "status": "HOLD",
       "sub_portfolio": "growth",
@@ -2200,8 +2268,8 @@
         "liquidity"
       ],
       "last_review_date": "2026-09-25",
-      "last_review_reason": "score 72.20 core HOLD >= 70; rescored put @ 550.00; fallback stock score",
-      "last_review_score": 72.2,
+      "last_review_reason": "score 80.06 core HOLD >= 70; rescored put @ 550.00",
+      "last_review_score": 80.06,
       "metadata": {
         "cad_equiv": 3992.57,
         "capital_at_risk": 3905.0,
@@ -2270,6 +2338,12 @@
           "date": "2026-09-25",
           "reason": "score 72.20 core HOLD >= 70; rescored put @ 550.00; fallback stock score",
           "score": 72.2,
+          "status": "HOLD"
+        },
+        {
+          "date": "2026-09-25",
+          "reason": "score 80.06 core HOLD >= 70; rescored put @ 550.00",
+          "score": 80.06,
           "status": "HOLD"
         }
       ],
@@ -2365,6 +2439,12 @@
           "reason": "score 77.00 core HOLD >= 70; no options chain available; fallback stock score; cross-account exposure MU: $18,598 (12.8% total capital)",
           "score": 77.0,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-09-25",
+          "reason": "score 77.00 core HOLD >= 70; no options chain available; fallback stock score; cross-account exposure MU: $18,598 (12.8% total capital)",
+          "score": 77.0,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -2405,8 +2485,8 @@
         "highly liquid large-cap"
       ],
       "last_review_date": "2026-09-25",
-      "last_review_reason": "score 85.23 core HOLD >= 70; above 50-day MA (strong trend); moderate volatility (22%); highly liquid large-cap; near recent highs (strength); cross-account exposure AAPL: $9,635 (6.6% total capital)",
-      "last_review_score": 85.23,
+      "last_review_reason": "score 85.94 core HOLD >= 70; above 50-day MA (strong trend); moderate volatility (22%); highly liquid large-cap; near recent highs (strength); cross-account exposure AAPL: $9,635 (6.6% total capital)",
+      "last_review_score": 85.94,
       "metadata": {},
       "quantity": 12,
       "review_history": [
@@ -2475,6 +2555,12 @@
           "reason": "score 85.23 core HOLD >= 70; above 50-day MA (strong trend); moderate volatility (22%); highly liquid large-cap; near recent highs (strength); cross-account exposure AAPL: $9,635 (6.6% total capital)",
           "score": 85.23,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-09-25",
+          "reason": "score 85.94 core HOLD >= 70; above 50-day MA (strong trend); moderate volatility (22%); highly liquid large-cap; near recent highs (strength); cross-account exposure AAPL: $9,635 (6.6% total capital)",
+          "score": 85.94,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -2492,8 +2578,8 @@
         "highly liquid large-cap"
       ],
       "last_review_date": "2026-09-25",
-      "last_review_reason": "score 60.93 in trim-watch band 60-70; below 20-day MA (caution); low volatility (12%); highly liquid large-cap; near recent highs (strength)",
-      "last_review_score": 60.93,
+      "last_review_reason": "score 59.75 in FLAG band 45-60; below 20-day MA (caution); low volatility (12%); highly liquid large-cap; near recent highs (strength)",
+      "last_review_score": 59.75,
       "metadata": {},
       "quantity": 223,
       "review_history": [
@@ -2556,9 +2642,15 @@
           "reason": "score 60.93 in trim-watch band 60-70; below 20-day MA (caution); low volatility (12%); highly liquid large-cap; near recent highs (strength)",
           "score": 60.93,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-09-25",
+          "reason": "score 59.75 in FLAG band 45-60; below 20-day MA (caution); low volatility (12%); highly liquid large-cap; near recent highs (strength)",
+          "score": 59.75,
+          "status": "FLAG"
         }
       ],
-      "status": "HOLD",
+      "status": "FLAG",
       "sub_portfolio": "stability",
       "ticker": "BCE.TO"
     },
@@ -2573,8 +2665,8 @@
         "highly liquid large-cap"
       ],
       "last_review_date": "2026-09-25",
-      "last_review_reason": "score 90.39 core HOLD >= 70; above 50-day MA (strong trend); low volatility (11%); highly liquid large-cap; near recent highs (strength); cross-account exposure SPY: $25,509 (17.6% total capital)",
-      "last_review_score": 90.39,
+      "last_review_reason": "score 90.27 core HOLD >= 70; above 50-day MA (strong trend); low volatility (11%); highly liquid large-cap; near recent highs (strength); cross-account exposure SPY: $25,509 (17.6% total capital)",
+      "last_review_score": 90.27,
       "metadata": {},
       "quantity": 5,
       "review_history": [
@@ -2643,6 +2735,12 @@
           "reason": "score 90.39 core HOLD >= 70; above 50-day MA (strong trend); low volatility (11%); highly liquid large-cap; near recent highs (strength); cross-account exposure SPY: $25,509 (17.6% total capital)",
           "score": 90.39,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-09-25",
+          "reason": "score 90.27 core HOLD >= 70; above 50-day MA (strong trend); low volatility (11%); highly liquid large-cap; near recent highs (strength); cross-account exposure SPY: $25,509 (17.6% total capital)",
+          "score": 90.27,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -2660,8 +2758,8 @@
         "highly liquid large-cap"
       ],
       "last_review_date": "2026-09-25",
-      "last_review_reason": "score 58.65 in FLAG band 45-60; below 20-day MA (caution); low volatility (16%); highly liquid large-cap; near recent highs (strength); cross-account exposure TD: $8,634 (6.0% total capital)",
-      "last_review_score": 58.65,
+      "last_review_reason": "score 83.55 core HOLD >= 70; above 50-day MA (strong trend); low volatility (16%); highly liquid large-cap; near recent highs (strength); cross-account exposure TD: $8,634 (6.0% total capital)",
+      "last_review_score": 83.55,
       "metadata": {},
       "quantity": 23,
       "review_history": [
@@ -2688,9 +2786,15 @@
           "reason": "score 58.65 in FLAG band 45-60; below 20-day MA (caution); low volatility (16%); highly liquid large-cap; near recent highs (strength); cross-account exposure TD: $8,634 (6.0% total capital)",
           "score": 58.65,
           "status": "FLAG"
+        },
+        {
+          "date": "2026-09-25",
+          "reason": "score 83.55 core HOLD >= 70; above 50-day MA (strong trend); low volatility (16%); highly liquid large-cap; near recent highs (strength); cross-account exposure TD: $8,634 (6.0% total capital)",
+          "score": 83.55,
+          "status": "HOLD"
         }
       ],
-      "status": "FLAG",
+      "status": "HOLD",
       "sub_portfolio": "stability",
       "ticker": "TD.TO"
     },
@@ -2728,8 +2832,8 @@
         "outperforming market"
       ],
       "last_review_date": "2026-09-25",
-      "last_review_reason": "score 67.88 in trim-watch band 60-70; above 20MA; above 50MA; low vol (16%); strong liquidity",
-      "last_review_score": 67.88,
+      "last_review_reason": "score 67.72 in trim-watch band 60-70; above 20MA; above 50MA; low vol (17%); strong liquidity",
+      "last_review_score": 67.72,
       "metadata": {},
       "quantity": 112,
       "review_history": [
@@ -2756,6 +2860,12 @@
           "reason": "score 67.88 in trim-watch band 60-70; above 20MA; above 50MA; low vol (16%); strong liquidity",
           "score": 67.88,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-09-25",
+          "reason": "score 67.72 in trim-watch band 60-70; above 20MA; above 50MA; low vol (17%); strong liquidity",
+          "score": 67.72,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -2773,8 +2883,8 @@
         "outperforming market"
       ],
       "last_review_date": "2026-09-25",
-      "last_review_reason": "score 64.97 in trim-watch band 60-70; above 20MA; above 50MA; low vol (22%); strong liquidity; cross-account exposure GILD: $26,274 (18.1% total capital)",
-      "last_review_score": 64.97,
+      "last_review_reason": "score 67.89 in trim-watch band 60-70; above 20MA; above 50MA; low vol (22%); strong liquidity; cross-account exposure GILD: $26,274 (18.1% total capital)",
+      "last_review_score": 67.89,
       "metadata": {},
       "quantity": 137,
       "review_history": [
@@ -2837,6 +2947,12 @@
           "reason": "score 64.97 in trim-watch band 60-70; above 20MA; above 50MA; low vol (22%); strong liquidity; cross-account exposure GILD: $26,274 (18.1% total capital)",
           "score": 64.97,
           "status": "HOLD"
+        },
+        {
+          "date": "2026-09-25",
+          "reason": "score 67.89 in trim-watch band 60-70; above 20MA; above 50MA; low vol (22%); strong liquidity; cross-account exposure GILD: $26,274 (18.1% total capital)",
+          "score": 67.89,
+          "status": "HOLD"
         }
       ],
       "status": "HOLD",
@@ -2854,7 +2970,7 @@
         "outperforming market"
       ],
       "last_review_date": "2026-09-25",
-      "last_review_reason": "score 77.00 core HOLD >= 70; above 20MA; above 50MA; outperforming market; high vol (51%) penalised; strong liquidity; cross-account exposure MU: $18,598 (12.8% total capital)",
+      "last_review_reason": "score 77.00 core HOLD >= 70; above 20MA; above 50MA; outperforming market; high vol (50%) penalised; strong liquidity; cross-account exposure MU: $18,598 (12.8% total capital)",
       "last_review_score": 77.0,
       "metadata": {},
       "quantity": 14,
@@ -2916,6 +3032,12 @@
         {
           "date": "2026-09-25",
           "reason": "score 77.00 core HOLD >= 70; above 20MA; above 50MA; outperforming market; high vol (51%) penalised; strong liquidity; cross-account exposure MU: $18,598 (12.8% total capital)",
+          "score": 77.0,
+          "status": "HOLD"
+        },
+        {
+          "date": "2026-09-25",
+          "reason": "score 77.00 core HOLD >= 70; above 20MA; above 50MA; outperforming market; high vol (50%) penalised; strong liquidity; cross-account exposure MU: $18,598 (12.8% total capital)",
           "score": 77.0,
           "status": "HOLD"
         }
