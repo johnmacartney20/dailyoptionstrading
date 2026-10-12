@@ -1599,6 +1599,62 @@ def _build_rebalance_plan(
     ]
 
 
+def _add_exit_sells_to_plan(plan: list[dict], exited_positions: list[dict]) -> None:
+    """Add explicit SELL actions for positions exited by today's review.
+
+    Exited positions are moved out of active state before the plan is built, so
+    without this they would never be listed as positions to sell.
+    """
+    for pos in exited_positions:
+        if bool((pos.get("metadata", {}) or {}).get("is_cash", False)):
+            continue
+        account = str(pos.get("account_type", "")).upper()
+        sleeve = str(pos.get("sub_portfolio", "")).lower()
+        ticker = str(pos.get("ticker", "")).upper()
+        family = _ticker_family_key(ticker)
+        value = _position_book_value(pos)
+        qty = max(int(float(pos.get("quantity", 0.0) or 0.0)), 0)
+        account_plan = next(
+            (
+                ap for ap in plan
+                if str(ap.get("account", "")).upper() == account
+                and str(ap.get("sub_portfolio", "")).lower() == sleeve
+            ),
+            None,
+        )
+        if account_plan is None:
+            account_plan = {
+                "account": account,
+                "sub_portfolio": sleeve,
+                "capital": 0.0,
+                "current_total": 0.0,
+                "target_total": 0.0,
+                "suggested_cash": 0.0,
+                "actions": [],
+            }
+            plan.append(account_plan)
+        actions = account_plan.setdefault("actions", [])
+        if any(
+            _ticker_family_key(str(a.get(k, ""))) == family
+            for a in actions
+            for k in ("ticker", "sell_ticker")
+            if a.get(k)
+        ):
+            continue
+        reason = str(pos.get("exit_reason") or "").strip() or "EXIT verdict from holdings review"
+        actions.append(
+            {
+                "action": "SELL",
+                "ticker": ticker,
+                "current": value,
+                "target": 0.0,
+                "delta": -value,
+                "quantity": qty,
+                "reason": reason,
+            }
+        )
+
+
 def _print_rebalance_plan(plan: list[dict]) -> None:
     """Print sell/trim/buy suggestions for full-portfolio rebalance."""
     sep = "=" * 118
@@ -1944,6 +2000,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         freed_capital.get("OPTIONS_spreads", 0.0),
         freed_capital.get("OPTIONS_stock", 0.0),
     )
+    exited_today = [
+        dict(p)
+        for p in state.get("positions", [])
+        if str(p.get("status", "")).upper() == "EXIT"
+    ]
     move_exited_positions(state)
     _print_model_holdings_snapshot(state)
 
@@ -2264,6 +2325,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         _print_compact_summary(suggestions, portfolio, options_stock, tfsa_opts, tfsa_stock, rrsp, fhsa_stock, args.top)
 
     rebalance_plan = _build_rebalance_plan(state, portfolio, options_stock, tfsa_opts, tfsa_stock, rrsp, fhsa_stock)
+    _add_exit_sells_to_plan(rebalance_plan, exited_today)
     _print_rebalance_plan(rebalance_plan)
 
     # ── Persist state: add new entries after today's review/allocation ───────
