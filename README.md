@@ -9,7 +9,7 @@ Scans public **free** data sources (Yahoo Finance via [`yfinance`](https://githu
 * Ranks candidates with a composite score (annualised return + liquidity bonus).
 * Displays a formatted summary table; optionally exports full results to CSV.
 * **Emails an HTML summary** to any address via Gmail (or any SMTP relay).
-* **Runs automatically every weekday** via a GitHub Actions scheduled workflow.
+* **Runs on demand** via a manually triggered GitHub Actions workflow.
 * Computes **TFSA (growth)** and **RRSP (stability)** stock allocations for longer-term accounts.
 * Optional **monthly TFSA + RRSP portfolio review email** via GitHub Actions.
 * Configurable ticker lists and screening parameters in `scanner/config.py`.
@@ -78,14 +78,8 @@ These flags only affect the **monthly** TFSA + RRSP review email (triggered via 
 
 ## Automated Daily Email via GitHub Actions
 
-The workflow at `.github/workflows/daily_scan.yml` runs the scanner automatically
-every weekday with an **8:45 AM ET** target and emails you the results.
-Because GitHub Actions cron uses UTC, the workflow includes both daylight-saving and
-standard-time UTC schedules and then gates execution by matching the triggered cron entry
-against the current `America/New_York` UTC offset. Scheduled runs also log the scheduled
-cron time versus the actual dispatch time, and they only proceed when the job actually
-starts between **7:45 AM ET and 3:59 PM ET**. If the guard blocks a scheduled run, the
-workflow fails visibly in GitHub Actions instead of reporting a silent green success.
+The workflow at `.github/workflows/daily_scan.yml` runs the scanner when you trigger it
+manually (e.g. at market open) and emails you the results. There is no scheduled run.
 
 ### One-time setup (5 minutes)
 
@@ -128,31 +122,11 @@ You can also trigger the workflow on demand:
 2. Optionally override the exchange, strategy, or top-N values.
 3. Click **Run workflow**.
 
-### Changing the schedule
-
-Edit the scheduled UTC entries in `.github/workflows/daily_scan.yml`:
-
-```yaml
-# Current ET target:
-#   8:45 AM ET  -> 12:45 UTC (EDT) / 13:45 UTC (EST)
-- cron: "45 12 * * 1-5"
-- cron: "45 13 * * 1-5"
-
-# Scheduled runs fail visibly unless they begin between 7:45 AM ET and
-# 3:59 PM ET.
-
-# Examples:
-# "15 16 * * 1-5"  = 12:15 PM EDT / 11:15 AM EST
-# "0  14 * * 1-5"  = 10:00 AM EDT / 9:00 AM EST
-# "45 13 * * 1-5" = 9:45 AM EDT / 8:45 AM EST
-# "0  21 * * 1-5"  = 5:00 PM EDT / 4:00 PM EST (after-hours recap)
-```
-
 ## Project Layout
 
 ```
 dailyoptionstrading/
-├── .github/workflows/daily_scan.yml  # Scheduled email workflow
+├── .github/workflows/daily_scan.yml  # Manually triggered email workflow
 ├── main.py                           # CLI entry point
 ├── requirements.txt
 ├── scanner/
